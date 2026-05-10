@@ -223,17 +223,18 @@ func runUsagePoll(ctx context.Context, client *redis.Client, projectsDir string,
 // When baseURL is non-empty (test paths pointing at a local httptest server),
 // a plain *http.Client is returned — no TLS impersonation needed since the test
 // server uses plain HTTP. When baseURL is empty (production, real claude.ai
-// endpoint), a TLS-impersonating client is returned to bypass Cloudflare.
-// Returns nil on TLS client creation failure (caller falls back to JSONL).
+// endpoint), a Python subprocess client using curl_cffi is returned to bypass
+// Cloudflare's TLS fingerprint check. Returns nil on creation failure (caller
+// falls back to JSONL).
 func buildHTTPDoer(baseURL string, log *zap.Logger) anthropicapi.HTTPDoer {
 	if baseURL != "" {
 		// Test path: plain standard http.Client works against httptest servers.
 		return &http.Client{Timeout: 10 * time.Second}
 	}
-	// Production path: TLS impersonation (Chrome 120 fingerprint).
-	c, err := anthropicapi.NewTLSClient()
+	// Production path: Python subprocess + curl_cffi (Chrome120 impersonation).
+	c, err := anthropicapi.NewPythonClient()
 	if err != nil {
-		log.Warn("usage poll: failed to create TLS client, falling back to JSONL", zap.Error(err))
+		log.Warn("usage poll: failed to create Python client (python3/curl_cffi missing?), falling back to JSONL", zap.Error(err))
 		return nil
 	}
 	return c
