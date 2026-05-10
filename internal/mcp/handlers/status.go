@@ -43,6 +43,7 @@ type sessionSummary struct {
 
 // NewStatusHandler returns a mesh_status tool handler.
 // timeoutMs is the per-call Redis latency budget (design §8: HandlerTimeoutMs).
+// Supports optional max_age_seconds parameter to filter stale sessions.
 func NewStatusHandler(s store.Store, timeoutMs int) ToolFn {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		ctx, cancel := context.WithTimeout(ctx, time.Duration(timeoutMs)*time.Millisecond)
@@ -57,8 +58,20 @@ func NewStatusHandler(s store.Store, timeoutMs int) ToolFn {
 			})
 		}
 
+		// Apply max_age_seconds filter if provided.
+		// cutoffMs is the oldest last_seen_ms that qualifies. Zero means no filter.
+		var cutoffMs float64
+		args := req.GetArguments()
+		if maxAge, ok := args["max_age_seconds"].(float64); ok && maxAge > 0 {
+			nowMs := float64(time.Now().UnixMilli())
+			cutoffMs = nowMs - maxAge*1000
+		}
+
 		summaries := make([]sessionSummary, 0, len(sessions))
 		for _, sv := range sessions {
+			if cutoffMs > 0 && sv.LastSeenMs < cutoffMs {
+				continue // session is older than the requested window
+			}
 			summaries = append(summaries, sessionSummary{
 				SessionID:  sv.ID,
 				Cwd:        sv.Cwd,

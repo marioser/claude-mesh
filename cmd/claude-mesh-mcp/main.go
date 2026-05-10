@@ -11,6 +11,7 @@ import (
 	"claude-mesh/internal/config"
 	"claude-mesh/internal/logging"
 	mcpserver "claude-mesh/internal/mcp"
+	"claude-mesh/internal/mqtt"
 	"claude-mesh/internal/store"
 )
 
@@ -54,6 +55,16 @@ func run() error {
 		log.Warn("redis unreachable at startup; handlers will return degraded responses")
 	}
 
-	srv := mcpserver.NewServer(s, cfg)
+	// Create MQTT client for mesh_announce. Use a unique client ID per process (includes PID).
+	brokerURL := fmt.Sprintf("tcp://%s:%d", cfg.MQTTHost, cfg.MQTTPort)
+	clientID := fmt.Sprintf("claude-mesh-mcp-%d", os.Getpid())
+	mqttClient := mqtt.NewPahoClient(brokerURL, clientID, cfg.MQTTUsername, cfg.MQTTPassword)
+	// Best-effort connect; mesh_announce returns degraded if MQTT is down.
+	if err := mqttClient.Connect(context.Background()); err != nil {
+		log.Warn("mqtt unreachable at startup; mesh_announce will return degraded responses")
+	}
+	defer mqttClient.Disconnect(500)
+
+	srv := mcpserver.NewServer(s, cfg, mqttClient)
 	return server.ServeStdio(srv)
 }

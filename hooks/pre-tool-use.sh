@@ -8,7 +8,8 @@ set -euo pipefail
 
 LOG_FILE="${HOME}/Library/Logs/claude-mesh-hooks.log"
 BRIDGE_BIN="claude-mesh-bridge"
-TIMEOUT_SECS=1
+TIMEOUT_SECS=1.5
+TIMEOUT_PERL=2  # perl alarm() requires integer; 2s is the ceiling of 1.5s
 
 log() {
     echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] pre-tool-use: $*" >> "${LOG_FILE}" 2>&1
@@ -57,7 +58,7 @@ fi
 if command -v timeout > /dev/null 2>&1; then
     echo "${PAYLOAD}" | timeout "${TIMEOUT_SECS}s" "${BRIDGE_BIN}" publish activity >> "${LOG_FILE}" 2>&1 || log "publish timeout or failed"
 else
-    echo "${PAYLOAD}" | perl -e 'alarm('"${TIMEOUT_SECS}"'); exec @ARGV' "${BRIDGE_BIN}" publish activity >> "${LOG_FILE}" 2>&1 || log "publish failed"
+    echo "${PAYLOAD}" | perl -e 'alarm('"${TIMEOUT_PERL}"'); exec @ARGV' "${BRIDGE_BIN}" publish activity >> "${LOG_FILE}" 2>&1 || log "publish failed"
 fi
 
 exit 0

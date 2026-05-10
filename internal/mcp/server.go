@@ -7,11 +7,14 @@ import (
 
 	"claude-mesh/internal/config"
 	"claude-mesh/internal/mcp/handlers"
+	"claude-mesh/internal/mqtt"
 	"claude-mesh/internal/store"
 )
 
-// NewServer creates an MCP server with all 4 Claude Mesh tools registered.
-func NewServer(s store.Store, cfg config.EnvOptions) *server.MCPServer {
+// NewServer creates an MCP server with all Claude Mesh tools registered.
+// mqttClient is used exclusively by the mesh_announce handler to publish intent events.
+// It may be nil if MQTT is unavailable; the handler will return degraded: true in that case.
+func NewServer(s store.Store, cfg config.EnvOptions, mqttClient mqtt.Client) *server.MCPServer {
 	srv := server.NewMCPServer(
 		"claude-mesh-mcp",
 		"1.0.0",
@@ -70,6 +73,21 @@ func NewServer(s store.Store, cfg config.EnvOptions) *server.MCPServer {
 			mcp.WithDescription("Lists all currently active Claude Code sessions."),
 		),
 		handlers.NewSessionsHandler(s, timeoutMs),
+	)
+
+	// mesh_announce — publish a manual intent event to MQTT for the current session.
+	srv.AddTool(
+		mcp.NewTool("mesh_announce",
+			mcp.WithDescription("Publishes a manual intent event to MQTT so other sessions can observe it."),
+			mcp.WithString("intent",
+				mcp.Required(),
+				mcp.Description("Free-form description of the work being started (e.g. 'starting redis refactor')."),
+			),
+			mcp.WithString("session_id",
+				mcp.Description("Calling session ID (optional; used to stamp the activity event)."),
+			),
+		),
+		handlers.NewAnnounceHandler(mqttClient, timeoutMs),
 	)
 
 	return srv

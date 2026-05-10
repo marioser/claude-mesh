@@ -124,6 +124,74 @@ func TestStatusNoSessions(t *testing.T) {
 	}
 }
 
+// TestStatusMaxAgeFilter verifies that mesh_status filters sessions older than max_age_seconds.
+func TestStatusMaxAgeFilter(t *testing.T) {
+	nowMs := float64(time.Now().UnixMilli())
+	recentMs := nowMs - 10_000  // 10 seconds ago
+	staleMs := nowMs - 120_000  // 120 seconds ago (older than 60s filter)
+
+	s := &fakeStore{
+		healthy: true,
+		sessions: []store.SessionView{
+			{ID: "recent", Cwd: "/recent", GitBranch: "main", Host: "h1", LastSeenMs: recentMs},
+			{ID: "stale", Cwd: "/stale", GitBranch: "main", Host: "h2", LastSeenMs: staleMs},
+		},
+	}
+
+	handler := handlers.NewStatusHandler(s, 100)
+	req := mcp.CallToolRequest{}
+	// Pass max_age_seconds = 60: only sessions seen in the last 60s should appear.
+	req.Params.Arguments = map[string]any{
+		"max_age_seconds": float64(60),
+	}
+
+	result, err := handler(context.Background(), req)
+	if err != nil {
+		t.Fatalf("StatusHandler with max_age_seconds: %v", err)
+	}
+
+	m := parseResult(t, result)
+
+	count, _ := m["active_count"].(float64)
+	if int(count) != 1 {
+		t.Errorf("active_count: got %v, want 1 (stale session filtered out)", count)
+	}
+
+	sessionsRaw, ok := m["sessions"].([]any)
+	if !ok || len(sessionsRaw) != 1 {
+		t.Fatalf("sessions: got %v, want 1 entry", m["sessions"])
+	}
+
+	sess, _ := sessionsRaw[0].(map[string]any)
+	if sid, _ := sess["session_id"].(string); sid != "recent" {
+		t.Errorf("expected session_id 'recent', got %q", sid)
+	}
+}
+
+// TestStatusMaxAgeNoFilter verifies that without max_age_seconds all sessions are returned.
+func TestStatusMaxAgeNoFilter(t *testing.T) {
+	nowMs := float64(time.Now().UnixMilli())
+	s := &fakeStore{
+		healthy: true,
+		sessions: []store.SessionView{
+			{ID: "s1", LastSeenMs: nowMs - 5_000},
+			{ID: "s2", LastSeenMs: nowMs - 200_000}, // very old
+		},
+	}
+
+	handler := handlers.NewStatusHandler(s, 100)
+	result, err := handler(context.Background(), mcp.CallToolRequest{})
+	if err != nil {
+		t.Fatalf("StatusHandler: %v", err)
+	}
+
+	m := parseResult(t, result)
+	count, _ := m["active_count"].(float64)
+	if int(count) != 2 {
+		t.Errorf("active_count without filter: got %v, want 2", count)
+	}
+}
+
 // TestStatusRedisTimeout verifies that a Redis timeout results in degraded:true and empty sessions.
 func TestStatusRedisTimeout(t *testing.T) {
 	s := &fakeStore{healthy: false} // HealthCheck returns error, ListActiveSessions also errors
