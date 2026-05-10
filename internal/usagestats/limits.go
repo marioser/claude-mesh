@@ -15,12 +15,19 @@ type Plan struct {
 	LimitWeek int    // tokens per 7-day rolling window
 }
 
-// planDefaults maps tier name → (limit5h, limitWeek).
-// limitWeek = limit5h × 7 × 24 / 5 (number of 5h blocks in a week).
+// planDefaults maps tier name → (limit5h, limitWeek) in tokens.
+// Calibrated against real /usage screenshots (Session 2%, Week 6%) cross-referenced
+// with ccusage block totals. The numbers from Claude-Code-Usage-Monitor (Python)
+// were 4 orders of magnitude too small — turns out they referred to a different metric.
+//
+// These are TOKENS (input + cache_read + cache_creation per assistant message),
+// matching the JSONL parser's counting model. Real Anthropic limits may differ
+// slightly per account; users can override via CLAUDE_MESH_5H_LIMIT_TOKENS and
+// CLAUDE_MESH_WEEK_LIMIT_TOKENS for precise calibration.
 var planDefaults = map[string][2]int{
-	"pro":   {19_000, 638_400},    // 19_000 × 7 × 24 / 5
-	"max5":  {88_000, 2_956_800},  // 88_000 × 7 × 24 / 5
-	"max20": {220_000, 7_392_000}, // 220_000 × 7 × 24 / 5
+	"pro":   {37_000_000, 2_440_000_000},  // ~8% of Max20 (rough)
+	"max5":  {115_000_000, 7_625_000_000}, // ~25% of Max20 (rough)
+	"max20": {463_000_000, 30_500_000_000}, // calibrated 2026-05-10: /usage 22%/12% → 101.8M/3.66B → 463M/30.5B
 }
 
 // defaultTier is used when CLAUDE_MESH_PLAN_TIER is empty or unknown.

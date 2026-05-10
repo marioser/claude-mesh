@@ -79,9 +79,13 @@ func parseJSONL(path string, since time.Time) ([]Entry, error) {
 
 	var results []Entry
 	scanner := bufio.NewScanner(f)
-	// Allow large lines (transcript lines can be several KB).
-	const maxLineBytes = 256 * 1024
-	scanner.Buffer(make([]byte, maxLineBytes), maxLineBytes)
+	// Transcript lines can be several MB (assistant messages with full tool outputs,
+	// code blocks, file reads). 64KB default is way too small. Bump to 32MB max.
+	const (
+		initialBuf = 256 * 1024
+		maxLineBytes = 32 * 1024 * 1024
+	)
+	scanner.Buffer(make([]byte, initialBuf), maxLineBytes)
 
 	for scanner.Scan() {
 		line := scanner.Bytes()

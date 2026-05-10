@@ -18,12 +18,11 @@ func TestResolveFromEnvDefaultMax20(t *testing.T) {
 	if p.Tier != "max20" {
 		t.Errorf("Tier: want 'max20', got %q", p.Tier)
 	}
-	if p.Limit5h != 220_000 {
-		t.Errorf("Limit5h: want 220_000, got %d", p.Limit5h)
+	if p.Limit5h != 463_000_000 {
+		t.Errorf("Limit5h: want 463_000_000, got %d", p.Limit5h)
 	}
-	// Weekly = 220_000 × 7 × 24 / 5 = 7_392_000
-	if p.LimitWeek != 7_392_000 {
-		t.Errorf("LimitWeek: want 7_392_000, got %d", p.LimitWeek)
+	if p.LimitWeek != 30_500_000_000 {
+		t.Errorf("LimitWeek: want 30_500_000_000, got %d", p.LimitWeek)
 	}
 }
 
@@ -39,12 +38,11 @@ func TestResolveFromEnvProTier(t *testing.T) {
 	if p.Tier != "pro" {
 		t.Errorf("Tier: want 'pro', got %q", p.Tier)
 	}
-	if p.Limit5h != 19_000 {
-		t.Errorf("Limit5h: want 19_000, got %d", p.Limit5h)
+	if p.Limit5h != 37_000_000 {
+		t.Errorf("Limit5h: want 37_000_000, got %d", p.Limit5h)
 	}
-	// Weekly = 19_000 × 7 × 24 / 5 = 638_400
-	if p.LimitWeek != 638_400 {
-		t.Errorf("LimitWeek: want 638_400, got %d", p.LimitWeek)
+	if p.LimitWeek != 2_440_000_000 {
+		t.Errorf("LimitWeek: want 2_440_000_000, got %d", p.LimitWeek)
 	}
 }
 
@@ -60,12 +58,11 @@ func TestResolveFromEnvMax5Tier(t *testing.T) {
 	if p.Tier != "max5" {
 		t.Errorf("Tier: want 'max5', got %q", p.Tier)
 	}
-	if p.Limit5h != 88_000 {
-		t.Errorf("Limit5h: want 88_000, got %d", p.Limit5h)
+	if p.Limit5h != 115_000_000 {
+		t.Errorf("Limit5h: want 115_000_000, got %d", p.Limit5h)
 	}
-	// Weekly = 88_000 × 7 × 24 / 5 = 2_956_800
-	if p.LimitWeek != 2_956_800 {
-		t.Errorf("LimitWeek: want 2_956_800, got %d", p.LimitWeek)
+	if p.LimitWeek != 7_625_000_000 {
+		t.Errorf("LimitWeek: want 7_625_000_000, got %d", p.LimitWeek)
 	}
 }
 
@@ -97,7 +94,7 @@ func TestResolveFromEnvUnknownTierFallsBackToMax20(t *testing.T) {
 	if p.Tier != "max20" {
 		t.Errorf("Tier: want 'max20' fallback for unknown, got %q", p.Tier)
 	}
-	if p.Limit5h != 220_000 {
-		t.Errorf("Limit5h: want 220_000 for unknown tier fallback, got %d", p.Limit5h)
+	if p.Limit5h != 463_000_000 {
+		t.Errorf("Limit5h: want 463_000_000 for unknown tier fallback, got %d", p.Limit5h)
 	}
 }
