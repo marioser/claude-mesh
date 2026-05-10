@@ -448,3 +448,84 @@ func TestRender200kLimit(t *testing.T) {
 		t.Errorf("200k limit: must not contain '1M', got %q", line)
 	}
 }
+
+// TestRenderWith1MModel verifies the 🤖 block appears with the correct short name for a 1M model.
+func TestRenderWith1MModel(t *testing.T) {
+	s := &fakeStore{sessionCount: 2, activities: recentActivities(5)}
+	u := contextusage.Usage{
+		Tokens:  426000,
+		Limit:   1_000_000,
+		Percent: 42.6,
+		Method:  "usage",
+		Source:  "transcript",
+	}
+	in := statusline.Input{
+		Cwd: "/test",
+		Model: statusline.Model{
+			ID:          "claude-opus-4-7[1m]",
+			DisplayName: "Opus 4.7 (1M context)",
+		},
+	}
+	line := statusline.Render(context.Background(), s, "develop", in, u)
+
+	if !strings.Contains(line, "🤖") {
+		t.Errorf("Render 1M model: want '🤖' in %q", line)
+	}
+	if !strings.Contains(line, "Opus 4.7 (1M)") {
+		t.Errorf("Render 1M model: want 'Opus 4.7 (1M)' in %q", line)
+	}
+}
+
+// TestRenderWith200kModel verifies the 🤖 block shows the correct short name for a 200k model.
+func TestRenderWith200kModel(t *testing.T) {
+	s := &fakeStore{sessionCount: 1, activities: nil}
+	in := statusline.Input{
+		Cwd: "/test",
+		Model: statusline.Model{
+			ID:          "claude-sonnet-4-6",
+			DisplayName: "Claude Sonnet 4.6",
+		},
+	}
+	line := statusline.Render(context.Background(), s, "develop", in, zeroUsage())
+
+	if !strings.Contains(line, "🤖") {
+		t.Errorf("Render 200k model: want '🤖' in %q", line)
+	}
+	if !strings.Contains(line, "Sonnet 4.6") {
+		t.Errorf("Render 200k model: want 'Sonnet 4.6' in %q", line)
+	}
+}
+
+// TestRenderWithoutModel verifies no 🤖 block when Model is empty.
+func TestRenderWithoutModel(t *testing.T) {
+	s := &fakeStore{sessionCount: 1, activities: nil}
+	in := statusline.Input{Cwd: "/test"} // zero Model{}
+	line := statusline.Render(context.Background(), s, "develop", in, zeroUsage())
+
+	if strings.Contains(line, "🤖") {
+		t.Errorf("Render no model: must not contain '🤖', got %q", line)
+	}
+}
+
+// TestRenderDaemonDownWithModel verifies the 🤖 block appears even when daemon is down.
+func TestRenderDaemonDownWithModel(t *testing.T) {
+	s := &fakeStore{healthErr: errors.New("connection refused")}
+	in := statusline.Input{
+		Cwd: "/test",
+		Model: statusline.Model{
+			ID:          "claude-haiku-4-5-20251001",
+			DisplayName: "Haiku 4.5",
+		},
+	}
+	line := statusline.Render(context.Background(), s, "develop", in, zeroUsage())
+
+	if !strings.Contains(line, "🤖") {
+		t.Errorf("Render daemon down + model: want '🤖' in %q", line)
+	}
+	if !strings.Contains(line, "Haiku 4.5") {
+		t.Errorf("Render daemon down + model: want 'Haiku 4.5' in %q", line)
+	}
+	if !strings.Contains(line, "daemon down") {
+		t.Errorf("Render daemon down + model: want 'daemon down' in %q", line)
+	}
+}

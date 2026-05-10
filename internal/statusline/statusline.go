@@ -67,8 +67,11 @@ func Render(ctx context.Context, s store.Store, branch string, in Input, u conte
 	// Query session count.
 	sessions, sessErr := s.ListActiveSessions(redisCtx)
 	if sessErr != nil || ctx.Err() != nil {
-		// Daemon down fallback — still include context if available.
+		// Daemon down fallback — still include model and context if available.
 		parts := []string{branchPart}
+		if mp := modelPart(in.Model); mp != "" {
+			parts = append(parts, mp)
+		}
 		if u.Tokens > 0 {
 			parts = append(parts, contextPart(u))
 		}
@@ -95,8 +98,11 @@ func Render(ctx context.Context, s store.Store, branch string, in Input, u conte
 		}
 	}
 
-	// Build parts list, inserting context block after branch if available.
+	// Build parts list: branch → model → context → sessions → events → daemon.
 	parts := []string{branchPart}
+	if mp := modelPart(in.Model); mp != "" {
+		parts = append(parts, mp)
+	}
 	if u.Tokens > 0 {
 		parts = append(parts, contextPart(u))
 	}
@@ -156,4 +162,14 @@ func sessionPart(n int) string {
 		return "🔵 1 sesión"
 	}
 	return fmt.Sprintf("🔵 %d sesiones", n)
+}
+
+// modelPart formats the 🤖 model block. Returns empty string if no model info is available,
+// which signals the caller to omit this block entirely.
+func modelPart(m Model) string {
+	short := ShortModelName(m)
+	if short == "" {
+		return ""
+	}
+	return "🤖 " + short
 }
