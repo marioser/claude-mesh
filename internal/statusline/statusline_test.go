@@ -49,6 +49,55 @@ func (f *fakeStore) RecentActivity(_ context.Context, limit int, sid string) ([]
 func (f *fakeStore) SweepExpired(_ context.Context, _ float64) (int, error) { return 0, nil }
 func (f *fakeStore) HealthCheck(_ context.Context) error                     { return f.healthErr }
 
+// usageStore embeds fakeStore and adds usage keys for ReadUsage tests.
+type usageStore struct {
+	fakeStore
+	pct5h   float64
+	pctWeek float64
+	plan    string
+}
+
+func (u *usageStore) GetFloat(_ context.Context, key string) (float64, error) {
+	switch key {
+	case "claude:mesh:usage:pct:5h":
+		if u.pct5h == 0 {
+			return 0, errors.New("missing")
+		}
+		return u.pct5h, nil
+	case "claude:mesh:usage:pct:week":
+		if u.pctWeek == 0 {
+			return 0, errors.New("missing")
+		}
+		return u.pctWeek, nil
+	}
+	return 0, errors.New("key not found")
+}
+
+func (u *usageStore) GetInt(_ context.Context, key string) (int, error) {
+	if key == "claude:mesh:usage:tokens:5h" {
+		return 50_000, nil
+	}
+	return 0, errors.New("key not found")
+}
+
+func (u *usageStore) GetString(_ context.Context, key string) (string, error) {
+	if key == "claude:mesh:usage:plan" && u.plan != "" {
+		return u.plan, nil
+	}
+	return "", errors.New("key not found")
+}
+
+// plainFakeStore is fakeStore extended with no-op GetString/GetInt/GetFloat (zero/error).
+func (f *fakeStore) GetString(_ context.Context, _ string) (string, error) {
+	return "", errors.New("not found")
+}
+func (f *fakeStore) GetInt(_ context.Context, _ string) (int, error) {
+	return 0, errors.New("not found")
+}
+func (f *fakeStore) GetFloat(_ context.Context, _ string) (float64, error) {
+	return 0, errors.New("not found")
+}
+
 // recentActivities builds a slice of Activity events with timestamps within 5 minutes.
 func recentActivities(n int) []events.Activity {
 	acts := make([]events.Activity, n)
@@ -527,5 +576,146 @@ func TestRenderDaemonDownWithModel(t *testing.T) {
 	}
 	if !strings.Contains(line, "daemon down") {
 		t.Errorf("Render daemon down + model: want 'daemon down' in %q", line)
+	}
+}
+
+// --- ReadUsage and 📊 block tests ---
+
+// TestReadUsageWithData verifies ReadUsage returns correct percentages from Redis.
+func TestReadUsageWithData(t *testing.T) {
+	s := &usageStore{pct5h: 12.0, pctWeek: 6.5, plan: "max20"}
+
+	u := statusline.ReadUsage(context.Background(), s)
+
+	if u.Pct5h < 12.0-0.01 || u.Pct5h > 12.0+0.01 {
+		t.Errorf("ReadUsage.Pct5h: want 12.0, got %v", u.Pct5h)
+	}
+	if u.PctWeek < 6.5-0.01 || u.PctWeek > 6.5+0.01 {
+		t.Errorf("ReadUsage.PctWeek: want 6.5, got %v", u.PctWeek)
+	}
+	if u.Plan != "max20" {
+		t.Errorf("ReadUsage.Plan: want 'max20', got %q", u.Plan)
+	}
+}
+
+// TestReadUsageMissingKeys verifies ReadUsage returns zero Usage when keys are absent.
+func TestReadUsageMissingKeys(t *testing.T) {
+	s := &fakeStore{sessionCount: 1}
+
+	u := statusline.ReadUsage(context.Background(), s)
+
+	if u.Pct5h != 0 || u.PctWeek != 0 {
+		t.Errorf("ReadUsage missing keys: want zero, got Pct5h=%v PctWeek=%v", u.Pct5h, u.PctWeek)
+	}
+}
+
+// TestRenderUsageBlock verifies the 📊 block appears when both percentages are non-zero.
+// Expected format: "📊 🟢 Sesión 12% Semana 6%"
+func TestRenderUsageBlock(t *testing.T) {
+	s := &usageStore{
+		fakeStore: fakeStore{sessionCount: 1},
+		pct5h:     12.0,
+		pctWeek:   6.5,
+		plan:      "max20",
+	}
+	in := statusline.Input{Cwd: "/test"}
+	line := statusline.Render(context.Background(), s, "develop", in, zeroUsage())
+
+	if !strings.Contains(line, "📊") {
+		t.Errorf("Usage block: want '📊' in %q", line)
+	}
+	if !strings.Contains(line, "Sesión 12%") {
+		t.Errorf("Usage block: want 'Sesión 12%%' in %q", line)
+	}
+	// 6.5 rounds to 7% (int(6.5+0.5) = 7)
+	if !strings.Contains(line, "Semana 7%") {
+		t.Errorf("Usage block: want 'Semana 7%%' (6.5 rounds to 7) in %q", line)
+	}
+}
+
+// TestRenderUsageBlockOmittedWhenZero verifies no 📊 block when both percentages are zero.
+func TestRenderUsageBlockOmittedWhenZero(t *testing.T) {
+	s := &fakeStore{sessionCount: 1}
+	in := statusline.Input{Cwd: "/test"}
+	line := statusline.Render(context.Background(), s, "develop", in, zeroUsage())
+
+	if strings.Contains(line, "📊") {
+		t.Errorf("Zero usage: must not contain '📊' when percentages are 0, got %q", line)
+	}
+}
+
+// TestRenderUsageBlockPositionAfterContext verifies 📊 appears AFTER 🧠 and BEFORE 🔵.
+func TestRenderUsageBlockPositionAfterContext(t *testing.T) {
+	s := &usageStore{
+		fakeStore: fakeStore{sessionCount: 2},
+		pct5h:     50.0,
+		pctWeek:   20.0,
+		plan:      "max20",
+	}
+	u := contextusage.Usage{
+		Tokens:  100_000,
+		Limit:   200_000,
+		Percent: 50.0,
+		Method:  "usage",
+		Source:  "transcript",
+	}
+	in := statusline.Input{Cwd: "/test"}
+	line := statusline.Render(context.Background(), s, "develop", in, u)
+
+	idxContext := strings.Index(line, "🧠")
+	idxUsage := strings.Index(line, "📊")
+	idxSessions := strings.Index(line, "🔵")
+
+	if idxContext < 0 {
+		t.Fatalf("Position test: '🧠' not found in %q", line)
+	}
+	if idxUsage < 0 {
+		t.Fatalf("Position test: '📊' not found in %q", line)
+	}
+	if idxSessions < 0 {
+		t.Fatalf("Position test: '🔵' not found in %q", line)
+	}
+	if idxUsage <= idxContext {
+		t.Errorf("Position: '📊' must come AFTER '🧠': context=%d usage=%d in %q", idxContext, idxUsage, line)
+	}
+	if idxUsage >= idxSessions {
+		t.Errorf("Position: '📊' must come BEFORE '🔵': usage=%d sessions=%d in %q", idxUsage, idxSessions, line)
+	}
+}
+
+// TestRenderUsageBlockIconThresholds verifies color icons based on max(5h, week) %.
+// Max < 60% → 🟢, 60-80% → 🟡, 80-95% → 🔴, >=95% → 🚨
+func TestRenderUsageBlockIconThresholds(t *testing.T) {
+	cases := []struct {
+		pct5h, pctWeek float64
+		wantIcon       string
+	}{
+		{30.0, 10.0, "🟢"},   // max=30 → green
+		{70.0, 20.0, "🟡"},   // max=70 → yellow
+		{85.0, 40.0, "🔴"},   // max=85 → red
+		{97.0, 80.0, "🚨"},   // max=97 → critical
+		{20.0, 75.0, "🟡"},   // week dominates: 75 → yellow
+	}
+	for _, tc := range cases {
+		s := &usageStore{
+			fakeStore: fakeStore{sessionCount: 1},
+			pct5h:     tc.pct5h,
+			pctWeek:   tc.pctWeek,
+			plan:      "max20",
+		}
+		in := statusline.Input{Cwd: "/test"}
+		line := statusline.Render(context.Background(), s, "develop", in, zeroUsage())
+
+		// Find the 📊 block region (after "📊 ").
+		idx := strings.Index(line, "📊")
+		if idx < 0 {
+			t.Errorf("Threshold pct5h=%.0f pctWeek=%.0f: '📊' not found in %q", tc.pct5h, tc.pctWeek, line)
+			continue
+		}
+		region := line[idx:]
+		if !strings.Contains(region, tc.wantIcon) {
+			t.Errorf("Threshold pct5h=%.0f pctWeek=%.0f: want icon %q in block %q (full: %q)",
+				tc.pct5h, tc.pctWeek, tc.wantIcon, region, line)
+		}
 	}
 }

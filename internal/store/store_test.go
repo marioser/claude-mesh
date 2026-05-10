@@ -468,6 +468,73 @@ func TestPushActivityRefreshesSessionHashTTL(t *testing.T) {
 	}
 }
 
+// TestGetSetString verifies that SetString persists a string value retrievable via GetString.
+func TestGetSetString(t *testing.T) {
+	s, client := newTestStoreWithRedis(t)
+	ctx := context.Background()
+
+	// Write directly via raw client (simulates what the daemon poll loop does).
+	if err := client.Set(ctx, "test:key:str", "hello-world", 0).Err(); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+
+	got, err := s.GetString(ctx, "test:key:str")
+	if err != nil {
+		t.Fatalf("GetString: %v", err)
+	}
+	if got != "hello-world" {
+		t.Errorf("GetString: want %q, got %q", "hello-world", got)
+	}
+}
+
+// TestGetStringMissing verifies that GetString returns an error for a missing key.
+func TestGetStringMissing(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	_, err := s.GetString(ctx, "test:key:nonexistent")
+	if err == nil {
+		t.Error("GetString missing key: want error, got nil")
+	}
+}
+
+// TestGetFloat verifies that GetFloat parses a float value from a Redis key.
+func TestGetFloat(t *testing.T) {
+	s, client := newTestStoreWithRedis(t)
+	ctx := context.Background()
+
+	if err := client.Set(ctx, "test:key:float", "42.75", 0).Err(); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+
+	got, err := s.GetFloat(ctx, "test:key:float")
+	if err != nil {
+		t.Fatalf("GetFloat: %v", err)
+	}
+	const want = 42.75
+	if got < want-0.001 || got > want+0.001 {
+		t.Errorf("GetFloat: want %v, got %v", want, got)
+	}
+}
+
+// TestGetInt verifies that GetInt parses an integer value from a Redis key.
+func TestGetInt(t *testing.T) {
+	s, client := newTestStoreWithRedis(t)
+	ctx := context.Background()
+
+	if err := client.Set(ctx, "test:key:int", "12345", 0).Err(); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+
+	got, err := s.GetInt(ctx, "test:key:int")
+	if err != nil {
+		t.Fatalf("GetInt: %v", err)
+	}
+	if got != 12345 {
+		t.Errorf("GetInt: want 12345, got %d", got)
+	}
+}
+
 // Ensure json round-trip of SessionView works (used by ListActiveSessions internals).
 func TestSessionViewJSONSerde(t *testing.T) {
 	view := store.SessionView{

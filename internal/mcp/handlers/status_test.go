@@ -46,6 +46,15 @@ func (f *fakeStore) HealthCheck(_ context.Context) error {
 	}
 	return nil
 }
+func (f *fakeStore) GetString(_ context.Context, _ string) (string, error) {
+	return "", context.DeadlineExceeded
+}
+func (f *fakeStore) GetInt(_ context.Context, _ string) (int, error) {
+	return 0, context.DeadlineExceeded
+}
+func (f *fakeStore) GetFloat(_ context.Context, _ string) (float64, error) {
+	return 0, context.DeadlineExceeded
+}
 
 var _ store.Store = (*fakeStore)(nil)
 

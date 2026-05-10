@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -26,6 +27,7 @@ import (
 	"claude-mesh/internal/publisher"
 	"claude-mesh/internal/statusline"
 	"claude-mesh/internal/store"
+	"claude-mesh/internal/usagestats"
 
 	"github.com/redis/go-redis/v9"
 )
@@ -164,8 +166,92 @@ func runBridge(_ []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
+	// Start the usage tracking poll goroutine.
+	// It scans ~/.claude/projects/ every 60s and writes stats to Redis.
+	projectsDir := claudeProjectsDir()
+	plan := usagestats.ResolveFromEnv()
+	go runUsagePoll(ctx, redisClient, projectsDir, plan, log)
+
 	b.Run(ctx)
 	return nil
+}
+
+// claudeProjectsDir returns the path to ~/.claude/projects/.
+func claudeProjectsDir() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".claude", "projects")
+}
+
+// runUsagePoll runs the usage tracking loop. It polls every 60s, scans JSONL transcripts,
+// and writes stats to Redis with a 120s TTL. Errors are logged but never crash the daemon.
+func runUsagePoll(ctx context.Context, client *redis.Client, projectsDir string, plan usagestats.Plan, log *zap.Logger) {
+	pollUsageOnce(ctx, client, projectsDir, plan, log)
+
+	ticker := time.NewTicker(60 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			pollUsageOnce(ctx, client, projectsDir, plan, log)
+		}
+	}
+}
+
+// pollUsageOnce executes one usage scan+compute+write cycle.
+func pollUsageOnce(ctx context.Context, client *redis.Client, projectsDir string, plan usagestats.Plan, log *zap.Logger) {
+	since := time.Now().Add(-7 * 24 * time.Hour)
+	entries, err := usagestats.ScanProjects(projectsDir, since)
+	if err != nil {
+		log.Warn("usage poll: scan failed", zap.Error(err))
+		return
+	}
+
+	now := time.Now()
+	tokens5h := usagestats.FiveHourTokens(entries, now)
+	tokensWeek := usagestats.WeekTokens(entries, now)
+
+	var pct5h, pctWeek float64
+	if plan.Limit5h > 0 {
+		pct5h = float64(tokens5h) / float64(plan.Limit5h) * 100.0
+		if pct5h > 100.0 {
+			pct5h = 100.0
+		}
+	}
+	if plan.LimitWeek > 0 {
+		pctWeek = float64(tokensWeek) / float64(plan.LimitWeek) * 100.0
+		if pctWeek > 100.0 {
+			pctWeek = 100.0
+		}
+	}
+
+	const ttl = 120 * time.Second
+	writeCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+
+	pipe := client.Pipeline()
+	pipe.Set(writeCtx, "claude:mesh:usage:tokens:5h", tokens5h, ttl)
+	pipe.Set(writeCtx, "claude:mesh:usage:tokens:week", tokensWeek, ttl)
+	pipe.Set(writeCtx, "claude:mesh:usage:pct:5h", fmt.Sprintf("%.4f", pct5h), ttl)
+	pipe.Set(writeCtx, "claude:mesh:usage:pct:week", fmt.Sprintf("%.4f", pctWeek), ttl)
+	pipe.Set(writeCtx, "claude:mesh:usage:limit:5h", plan.Limit5h, ttl)
+	pipe.Set(writeCtx, "claude:mesh:usage:limit:week", plan.LimitWeek, ttl)
+	pipe.Set(writeCtx, "claude:mesh:usage:plan", plan.Tier, ttl)
+
+	if _, err := pipe.Exec(writeCtx); err != nil {
+		log.Warn("usage poll: redis write failed", zap.Error(err))
+		return
+	}
+
+	log.Debug("usage poll: ok",
+		zap.Int("tokens_5h", tokens5h),
+		zap.Int("tokens_week", tokensWeek),
+		zap.Float64("pct_5h", pct5h),
+		zap.Float64("pct_week", pctWeek),
+		zap.String("plan", plan.Tier),
+	)
 }
 
 func runPublish(eventType string, _ []string) error {

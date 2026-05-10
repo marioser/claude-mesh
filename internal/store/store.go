@@ -69,4 +69,13 @@ type Store interface {
 
 	// HealthCheck pings Redis. Returns nil if reachable.
 	HealthCheck(ctx context.Context) error
+
+	// GetString returns the string value for key. Returns error if key is missing.
+	GetString(ctx context.Context, key string) (string, error)
+
+	// GetInt parses the value at key as an integer.
+	GetInt(ctx context.Context, key string) (int, error)
+
+	// GetFloat parses the value at key as a float64.
+	GetFloat(ctx context.Context, key string) (float64, error)
 }

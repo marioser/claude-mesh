@@ -1,10 +1,11 @@
 // Package statusline renders a single-line status string for Claude Code's statusLine config.
 //
-// Format (with context info):
+// Format (with context and usage info):
 //
-//	🌳 <branch>[ (<changes>)] │ 🧠 <icon> <pct>% (<used>/<limit>) │ 🔵 <N> sesión(es) │ 📡 <N> eventos/5m │ ✅ daemon
+//	🌳 <branch>[ (<changes>)] │ 🤖 <model> │ 🧠 <icon> <pct>% (<used>/<limit>) │ 📊 <icon> Sesión X% Semana Y% │ 🔵 <N> sesión(es) │ 📡 <N> eventos/5m │ ✅ daemon
 //
 // If context Usage.Tokens == 0, the 🧠 block is omitted entirely.
+// If plan usage data is not yet available (pct5h == 0 && pctWeek == 0), the 📊 block is omitted.
 //
 // Performance: Render must complete within the caller's context deadline.
 // If Redis is unreachable or the context is canceled, a minimal fallback line is returned
@@ -24,7 +25,49 @@ import (
 const (
 	sep      = " │ "
 	windowMs = 5 * 60 * 1000 // 5 minutes in milliseconds
+
+	// Redis keys written by the usage poll goroutine in the daemon.
+	usageKeyPct5h   = "claude:mesh:usage:pct:5h"
+	usageKeyPctWeek = "claude:mesh:usage:pct:week"
+	usageKeyTokens5h = "claude:mesh:usage:tokens:5h"
+	usageKeyPlan    = "claude:mesh:usage:plan"
 )
+
+// PlanUsage holds the usage percentages read from Redis (written by the daemon poll loop).
+// Zero values indicate that the daemon hasn't computed stats yet.
+type PlanUsage struct {
+	Pct5h    float64 // 0..100 — percentage of 5h rolling block consumed
+	PctWeek  float64 // 0..100 — percentage of 7-day rolling window consumed
+	Tokens5h int     // raw tokens in the 5h window
+	Plan     string  // plan tier, e.g. "max20"
+}
+
+// ReadUsage reads plan usage data from Redis with a 30ms timeout.
+// Returns zero PlanUsage if any key is missing or Redis is unavailable.
+func ReadUsage(ctx context.Context, s store.Store) PlanUsage {
+	rctx, cancel := context.WithTimeout(ctx, 30*time.Millisecond)
+	defer cancel()
+
+	pct5h, err := s.GetFloat(rctx, usageKeyPct5h)
+	if err != nil {
+		return PlanUsage{}
+	}
+	pctWeek, err := s.GetFloat(rctx, usageKeyPctWeek)
+	if err != nil {
+		return PlanUsage{}
+	}
+
+	// Best-effort fields — ignore errors.
+	tokens5h, _ := s.GetInt(rctx, usageKeyTokens5h)
+	plan, _ := s.GetString(rctx, usageKeyPlan)
+
+	return PlanUsage{
+		Pct5h:    pct5h,
+		PctWeek:  pctWeek,
+		Tokens5h: tokens5h,
+		Plan:     plan,
+	}
+}
 
 // Input holds the JSON payload that Claude Code passes to the statusline command via stdin.
 // Fields not listed here are ignored.
@@ -64,6 +107,9 @@ func Render(ctx context.Context, s store.Store, branch string, in Input, u conte
 	redisCtx, cancel := context.WithTimeout(ctx, 50*time.Millisecond)
 	defer cancel()
 
+	// Read plan usage (best-effort, 30ms budget inside ReadUsage).
+	pu := ReadUsage(ctx, s)
+
 	// Query session count.
 	sessions, sessErr := s.ListActiveSessions(redisCtx)
 	if sessErr != nil || ctx.Err() != nil {
@@ -98,13 +144,16 @@ func Render(ctx context.Context, s store.Store, branch string, in Input, u conte
 		}
 	}
 
-	// Build parts list: branch → model → context → sessions → events → daemon.
+	// Build parts list: branch → model → context → usage → sessions → events → daemon.
 	parts := []string{branchPart}
 	if mp := modelPart(in.Model); mp != "" {
 		parts = append(parts, mp)
 	}
 	if u.Tokens > 0 {
 		parts = append(parts, contextPart(u))
+	}
+	if up := usagePart(pu); up != "" {
+		parts = append(parts, up)
 	}
 	parts = append(parts,
 		sessionPart(sessionCount),
@@ -113,6 +162,24 @@ func Render(ctx context.Context, s store.Store, branch string, in Input, u conte
 	)
 
 	return strings.Join(parts, sep)
+}
+
+// usagePart formats the 📊 plan usage block.
+// Format: "📊 🟢 Sesión X% Semana Y%"
+// Returns empty string if both percentages are zero (data not yet computed by daemon).
+func usagePart(pu PlanUsage) string {
+	if pu.Pct5h == 0 && pu.PctWeek == 0 {
+		return ""
+	}
+	// Icon uses the worst of the two percentages.
+	maxPct := pu.Pct5h
+	if pu.PctWeek > maxPct {
+		maxPct = pu.PctWeek
+	}
+	icon := contextIcon(maxPct)
+	pct5h := int(pu.Pct5h + 0.5)
+	pctWeek := int(pu.PctWeek + 0.5)
+	return fmt.Sprintf("📊 %s Sesión %d%% Semana %d%%", icon, pct5h, pctWeek)
 }
 
 // contextPart formats the 🧠 context usage block.
