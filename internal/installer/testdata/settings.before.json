@@ -1,0 +1,11 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "type": "command",
+        "command": "bash /path/to/neurostack/session-context.sh",
+        "name": "neurostack-session-context"
+      }
+    ]
+  }
+}

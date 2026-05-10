@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "mioboxtc": {
+      "command": "/path/to/mioboxtc-mcp",
+      "args": []
+    }
+  }
+}

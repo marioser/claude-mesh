@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "claude-mesh": {
+      "command": "/path/to/dist/claude-mesh-mcp",
+      "args": [],
+      "env": {
+        "CLAUDE_MESH_MQTT_HOST": "localhost",
+        "CLAUDE_MESH_MQTT_PORT": "1883",
+        "CLAUDE_MESH_REDIS_ADDR": "localhost:6379"
+      }
+    }
+  }
+}

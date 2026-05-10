@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+# Claude Mesh — SessionStart hook
+# Reads stdin JSON from Claude Code, extracts session info, and publishes a session-open event.
+# Produces NO stdout output (context injection must come from other hooks like NeuroStack).
+# All output is redirected to the log file.
+
+set -euo pipefail
+
+LOG_FILE="${HOME}/Library/Logs/claude-mesh-hooks.log"
+BRIDGE_BIN="claude-mesh-bridge"
+
+log() {
+    echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] session-start: $*" >> "${LOG_FILE}" 2>&1
+}
+
+# Guard: if binary is not found, log and exit 0 (never block Claude Code).
+if ! command -v "${BRIDGE_BIN}" > /dev/null 2>&1; then
+    log "binary not found: ${BRIDGE_BIN} — skipping"
+    exit 0
+fi
+
+# Ensure daemon is running (background, no-wait so we don't block startup).
+"${BRIDGE_BIN}" --ensure-running >> "${LOG_FILE}" 2>&1 &
+
+# Read stdin JSON from Claude Code.
+INPUT=$(cat)
+
+# Extract required fields using jq (macOS dev boxes have jq via brew).
+SESSION_ID=$(echo "${INPUT}" | jq -r '.session_id // ""' 2>/dev/null || true)
+CWD=$(echo "${INPUT}" | jq -r '.cwd // ""' 2>/dev/null || true)
+TRANSCRIPT=$(echo "${INPUT}" | jq -r '.transcript_path // ""' 2>/dev/null || true)
+GIT_BRANCH=$(git -C "${CWD}" branch --show-current 2>/dev/null || echo "")
+HOST=$(hostname -s 2>/dev/null || echo "unknown")
+PID=$$
+TS=$(python3 -c "import time; print(f'{time.time()*1000:.3f}')" 2>/dev/null || date +%s000)
+
+if [ -z "${SESSION_ID}" ]; then
+    log "missing session_id in stdin — skipping"
+    exit 0
+fi
+
+# Build JSON payload and publish with a 3s timeout.
+PAYLOAD=$(jq -n \
+    --arg ts "${TS}" \
+    --arg session_id "${SESSION_ID}" \
+    --arg cwd "${CWD}" \
+    --arg transcript_path "${TRANSCRIPT}" \
+    --arg git_branch "${GIT_BRANCH}" \
+    --arg host "${HOST}" \
+    --argjson pid "${PID}" \
+    '{ts: ($ts | tonumber), session_id: $session_id, cwd: $cwd, transcript_path: $transcript_path, git_branch: $git_branch, host: $host, pid: $pid}' \
+    2>/dev/null)
+
+if [ -z "${PAYLOAD}" ]; then
+    log "failed to build payload — skipping"
+    exit 0
+fi
+
+# Publish with timeout — exit 0 regardless of result (never block Claude Code).
+if command -v timeout > /dev/null 2>&1; then
+    echo "${PAYLOAD}" | timeout 3s "${BRIDGE_BIN}" publish session-open >> "${LOG_FILE}" 2>&1 || log "publish timed out or failed"
+else
+    # Fallback: perl timeout
+    echo "${PAYLOAD}" | perl -e 'alarm(3); exec @ARGV' "${BRIDGE_BIN}" publish session-open >> "${LOG_FILE}" 2>&1 || log "publish failed"
+fi
+
+exit 0
