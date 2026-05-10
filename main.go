@@ -18,6 +18,7 @@ import (
 
 	"claude-mesh/internal/bridge"
 	"claude-mesh/internal/config"
+	"claude-mesh/internal/contextusage"
 	"claude-mesh/internal/installer"
 	"claude-mesh/internal/logging"
 	mqttclient "claude-mesh/internal/mqtt"
@@ -221,8 +222,11 @@ func storeConfig(cfg config.EnvOptions) store.StoreConfig {
 }
 
 // runStatusline prints a single-line status string suitable for Claude Code's statusLine config.
-// Performance budget: <100ms p95. Redis is queried with a 50ms timeout; any failure returns
-// a minimal fallback line silently (no stderr output — Claude Code would show it to the user).
+// Claude Code passes a JSON payload on stdin with session_id, transcript_path, cwd, model, etc.
+//
+// Performance budget: <100ms p95. Git calls, transcript parse, and Redis query all run
+// concurrently. Any failure returns a minimal fallback line silently — no stderr
+// output (Claude Code would display it to the user).
 func runStatusline(_ []string) error {
 	cfg, err := config.Load()
 	if err != nil {
@@ -231,10 +235,28 @@ func runStatusline(_ []string) error {
 		return nil
 	}
 
-	// Resolve git branch with a 100ms timeout.
-	branch := gitBranch()
+	// Decode stdin JSON from Claude Code (non-fatal if stdin is empty or malformed).
+	var in statusline.Input
+	dec := json.NewDecoder(os.Stdin)
+	_ = dec.Decode(&in) // ignore error — graceful degrade to zero Input
 
-	// Connect to Redis with a total budget of 50ms (enforced inside statusline.Render).
+	// Run git + transcript parse concurrently (both CPU-bound or fast I/O).
+	type gitResult struct {
+		branch  string
+		changes int
+	}
+	gitCh := make(chan gitResult, 1)
+	usageCh := make(chan contextusage.Usage, 1)
+
+	go func() {
+		b, c := gitBranchAndChanges()
+		gitCh <- gitResult{branch: b, changes: c}
+	}()
+	go func() {
+		usageCh <- contextusage.Parse(in.TranscriptPath)
+	}()
+
+	// Connect to Redis with a total budget of 100ms (50ms enforced inside statusline.Render).
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 
@@ -245,23 +267,40 @@ func runStatusline(_ []string) error {
 	})
 	defer func() { _ = redisClient.Close() }()
 
+	gr := <-gitCh
+	u := <-usageCh
+	in.Changes = gr.changes
+
 	s := store.NewRedisStore(redisClient, storeConfig(cfg))
-	line := statusline.Render(ctx, s, branch)
+	line := statusline.Render(ctx, s, gr.branch, in, u)
 	fmt.Println(line)
 	return nil
 }
 
-// gitBranch returns the current git branch name for the working directory.
-// Returns "" if not in a git repo or git is unavailable.
-func gitBranch() string {
+// gitBranchAndChanges returns the current git branch and the count of dirty files.
+// Both operations use a 100ms timeout and fail silently to "" / 0.
+// Callers should invoke this in a goroutine when concurrency is desired.
+func gitBranchAndChanges() (branch string, changes int) {
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "git", "branch", "--show-current")
-	out, err := cmd.Output()
-	if err != nil {
-		return ""
+
+	// Branch.
+	branchCmd := exec.CommandContext(ctx, "git", "branch", "--show-current")
+	if out, err := branchCmd.Output(); err == nil {
+		branch = strings.TrimSpace(string(out))
 	}
-	return strings.TrimSpace(string(out))
+
+	// Dirty-file count via `git status --porcelain`.
+	statusCmd := exec.CommandContext(ctx, "git", "status", "--porcelain")
+	if out, err := statusCmd.Output(); err == nil {
+		for _, line := range strings.Split(string(out), "\n") {
+			if strings.TrimSpace(line) != "" {
+				changes++
+			}
+		}
+	}
+
+	return branch, changes
 }
 
 func usage() {

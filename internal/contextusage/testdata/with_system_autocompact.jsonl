@@ -1,0 +1,2 @@
+{"type":"tool_use","name":"Bash","input":{"command":"go test ./..."}}
+{"type":"system_message","content":"Context left until auto-compact: 23%"}

@@ -1,0 +1,15 @@
+{"type":"tool_use","name":"Read","input":{"file_path":"/a"}}
+{"type":"tool_result","content":"abc"}
+{"type":"tool_use","name":"Bash","input":{"command":"ls"}}
+{"type":"tool_result","content":"def"}
+{"type":"tool_use","name":"Edit","input":{"file_path":"/b"}}
+{"type":"tool_result","content":"ghi"}
+{"type":"tool_use","name":"Write","input":{"file_path":"/c"}}
+{"type":"tool_result","content":"jkl"}
+{"type":"tool_use","name":"Read","input":{"file_path":"/d"}}
+{"type":"tool_result","content":"mno"}
+{"type":"tool_use","name":"Bash","input":{"command":"make"}}
+{"type":"tool_result","content":"pqr"}
+{"type":"tool_use","name":"Edit","input":{"file_path":"/e"}}
+{"type":"tool_result","content":"stu"}
+{"type":"tool_use","name":"Write","input":{"file_path":"/f"}}

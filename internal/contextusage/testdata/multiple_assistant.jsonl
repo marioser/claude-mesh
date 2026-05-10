@@ -1,0 +1,3 @@
+{"type":"assistant","message":{"usage":{"input_tokens":10000,"cache_read_input_tokens":0,"cache_creation_input_tokens":0,"output_tokens":100},"content":[]}}
+{"type":"tool_use","name":"Read","input":{"file_path":"/some"}}
+{"type":"assistant","message":{"usage":{"input_tokens":30000,"cache_read_input_tokens":50000,"cache_creation_input_tokens":10000,"output_tokens":200},"content":[]}}
