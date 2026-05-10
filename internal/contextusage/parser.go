@@ -65,7 +65,14 @@ type rawType struct {
 // Parse reads the last maxLines lines of the transcript JSONL and extracts the
 // most recent context usage. Returns zero Usage{} if the file is missing, empty,
 // or contains no usable data. Never panics, never returns an error.
-func Parse(transcriptPath string) Usage {
+//
+// limit is the context window size in tokens. If limit <= 0, it falls back to
+// defaultLimit (200_000). Pass contextusage-specific model limits (e.g. 1_000_000
+// for Opus 4.7 [1m]) so that Percent is computed correctly against the real window.
+func Parse(transcriptPath string, limit int) Usage {
+	if limit <= 0 {
+		limit = defaultLimit
+	}
 	lines := readTailLines(transcriptPath)
 	if len(lines) == 0 {
 		return Usage{}
@@ -94,7 +101,7 @@ func Parse(transcriptPath string) Usage {
 			u := am.Message.Usage
 			total := u.InputTokens + u.CacheReadInputTokens + u.CacheCreationInputTokens
 			if total > 0 {
-				return usageFromTokens(total)
+				return usageFromTokens(total, limit)
 			}
 
 		case "system_message":
@@ -102,7 +109,7 @@ func Parse(transcriptPath string) Usage {
 			if err := json.Unmarshal(line, &sm); err != nil {
 				continue
 			}
-			if u, ok := parseSystemContent(sm.Content); ok {
+			if u, ok := parseSystemContent(sm.Content, limit); ok {
 				return u
 			}
 		}
@@ -112,14 +119,15 @@ func Parse(transcriptPath string) Usage {
 }
 
 // usageFromTokens builds a Usage with Method="usage" from a raw token count.
-func usageFromTokens(tokens int) Usage {
-	pct := float64(tokens) / float64(defaultLimit) * 100.0
+// limit is the effective context window (callers must pass > 0).
+func usageFromTokens(tokens, limit int) Usage {
+	pct := float64(tokens) / float64(limit) * 100.0
 	if pct > 100.0 {
 		pct = 100.0
 	}
 	return Usage{
 		Tokens:  tokens,
-		Limit:   defaultLimit,
+		Limit:   limit,
 		Percent: pct,
 		Method:  "usage",
 		Source:  "transcript",
@@ -128,7 +136,8 @@ func usageFromTokens(tokens int) Usage {
 
 // parseSystemContent tries to extract a percent from system_message content.
 // Returns (Usage, true) on match, (Usage{}, false) otherwise.
-func parseSystemContent(content string) (Usage, bool) {
+// limit is the effective context window (callers must pass > 0).
+func parseSystemContent(content string, limit int) (Usage, bool) {
 	// "Context left until auto-compact: X%"
 	if m := reAutoCompact.FindStringSubmatch(content); len(m) == 2 {
 		left, err := strconv.Atoi(m[1])
@@ -138,7 +147,7 @@ func parseSystemContent(content string) (Usage, bool) {
 		pct := float64(100 - left)
 		return Usage{
 			Percent: pct,
-			Limit:   defaultLimit,
+			Limit:   limit,
 			Method:  "system",
 			Source:  "transcript",
 		}, true
@@ -153,7 +162,7 @@ func parseSystemContent(content string) (Usage, bool) {
 		pct := float64(100 - left)
 		return Usage{
 			Percent: pct,
-			Limit:   defaultLimit,
+			Limit:   limit,
 			Method:  "system",
 			Source:  "transcript",
 		}, true

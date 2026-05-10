@@ -32,6 +32,9 @@ type Input struct {
 	SessionID      string `json:"session_id"`
 	TranscriptPath string `json:"transcript_path"`
 	Cwd            string `json:"cwd"`
+	// Model is the active Claude model passed by Claude Code in the stdin payload.
+	// Used to derive the correct context window limit via ContextLimitForModel.
+	Model Model `json:"model"`
 	// Changes is the count of dirty files from `git status --porcelain`.
 	// Populated by the caller (main.go) before invoking Render.
 	Changes int `json:"-"`
@@ -107,13 +110,22 @@ func Render(ctx context.Context, s store.Store, branch string, in Input, u conte
 }
 
 // contextPart formats the 🧠 context usage block.
-// Format: "🧠 🟢 45% (90k/200k)"
+// Format: "🧠 🟢 45% (90k/200k)" or "🧠 🟢 42% (426k/1M)"
 func contextPart(u contextusage.Usage) string {
 	icon := contextIcon(u.Percent)
 	usedK := formatK(u.Tokens)
-	limitK := formatK(u.Limit)
+	limitStr := formatLimit(u.Limit)
 	pct := int(u.Percent + 0.5) // round to nearest integer
-	return fmt.Sprintf("🧠 %s %d%% (%s/%s)", icon, pct, usedK, limitK)
+	return fmt.Sprintf("🧠 %s %d%% (%s/%s)", icon, pct, usedK, limitStr)
+}
+
+// formatLimit formats a context window limit for display.
+// 1_000_000 → "1M"; all others → formatK (e.g. "200k").
+func formatLimit(limit int) string {
+	if limit == 1_000_000 {
+		return "1M"
+	}
+	return formatK(limit)
 }
 
 // contextIcon returns the visual icon for the given usage percentage.

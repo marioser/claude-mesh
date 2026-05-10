@@ -253,11 +253,15 @@ func runStatusline(_ []string) error {
 		gitCh <- gitResult{branch: b, changes: c}
 	}()
 	go func() {
-		usageCh <- contextusage.Parse(in.TranscriptPath)
+		limit := statusline.ContextLimitForModel(in.Model)
+		usageCh <- contextusage.Parse(in.TranscriptPath, limit)
 	}()
 
-	// Connect to Redis with a total budget of 100ms (50ms enforced inside statusline.Render).
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	// Total budget 800ms — covers slow `git status` on large monorepos (~250ms)
+	// plus the 50ms Redis sub-timeout enforced inside statusline.Render.
+	// The Redis call itself remains capped at 50ms; this ceiling only protects
+	// against runaway git/transcript reads.
+	ctx, cancel := context.WithTimeout(context.Background(), 800*time.Millisecond)
 	defer cancel()
 
 	redisClient := redis.NewClient(&redis.Options{

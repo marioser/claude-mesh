@@ -397,3 +397,54 @@ func TestRenderTokenFormatK(t *testing.T) {
 		}
 	}
 }
+
+// TestRender1MLimit verifies the "1M" label in the context block when limit is 1_000_000.
+// This is the bug regression test: 42% (426k/1M) instead of 100% (200k/200k).
+func TestRender1MLimit(t *testing.T) {
+	s := &fakeStore{sessionCount: 1, activities: nil}
+	// Simulate 426k tokens with a 1M context window: ~42.6% → green icon.
+	u := contextusage.Usage{
+		Tokens:  426000,
+		Limit:   1_000_000,
+		Percent: 42.6,
+		Method:  "usage",
+		Source:  "transcript",
+	}
+	in := statusline.Input{Cwd: "/test"}
+	line := statusline.Render(context.Background(), s, "develop", in, u)
+
+	// Must show "1M" as the limit label.
+	if !strings.Contains(line, "1M") {
+		t.Errorf("1M limit: want '1M' in context block, got %q", line)
+	}
+	// Must NOT show "200k" as the limit.
+	if strings.Contains(line, "200k") {
+		t.Errorf("1M limit: must not show '200k' limit, got %q", line)
+	}
+	// At 42.6% → green icon 🟢.
+	if !strings.Contains(line, "🟢") {
+		t.Errorf("1M limit at 42%%: want '🟢' icon, got %q", line)
+	}
+}
+
+// TestRender200kLimit verifies "200k" label when limit is 200_000 (standard models).
+func TestRender200kLimit(t *testing.T) {
+	s := &fakeStore{sessionCount: 1, activities: nil}
+	u := contextusage.Usage{
+		Tokens:  190000,
+		Limit:   200_000,
+		Percent: 95.0,
+		Method:  "usage",
+		Source:  "transcript",
+	}
+	in := statusline.Input{Cwd: "/test"}
+	line := statusline.Render(context.Background(), s, "develop", in, u)
+
+	if !strings.Contains(line, "200k") {
+		t.Errorf("200k limit: want '200k' in context block, got %q", line)
+	}
+	// Must NOT show "1M".
+	if strings.Contains(line, "1M") {
+		t.Errorf("200k limit: must not contain '1M', got %q", line)
+	}
+}
