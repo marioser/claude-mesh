@@ -218,6 +218,27 @@ func runUsagePoll(ctx context.Context, client *redis.Client, projectsDir string,
 	}
 }
 
+// buildHTTPDoer returns the appropriate HTTPDoer for the given baseURL.
+//
+// When baseURL is non-empty (test paths pointing at a local httptest server),
+// a plain *http.Client is returned — no TLS impersonation needed since the test
+// server uses plain HTTP. When baseURL is empty (production, real claude.ai
+// endpoint), a TLS-impersonating client is returned to bypass Cloudflare.
+// Returns nil on TLS client creation failure (caller falls back to JSONL).
+func buildHTTPDoer(baseURL string, log *zap.Logger) anthropicapi.HTTPDoer {
+	if baseURL != "" {
+		// Test path: plain standard http.Client works against httptest servers.
+		return &http.Client{Timeout: 10 * time.Second}
+	}
+	// Production path: TLS impersonation (Chrome 120 fingerprint).
+	c, err := anthropicapi.NewTLSClient()
+	if err != nil {
+		log.Warn("usage poll: failed to create TLS client, falling back to JSONL", zap.Error(err))
+		return nil
+	}
+	return c
+}
+
 // pollUsageOnce executes one usage scan+compute+write cycle.
 //
 // When apiCfg.orgID and apiCfg.cookie are both non-empty, it first attempts to
@@ -230,38 +251,40 @@ func pollUsageOnce(ctx context.Context, client *redis.Client, projectsDir string
 
 	// --- Primary source: Anthropic API ---
 	if apiCfg.orgID != "" && apiCfg.cookie != "" {
-		httpClient := &http.Client{Timeout: 10 * time.Second}
-		usage, err := anthropicapi.FetchUsage(ctx, httpClient, apiCfg.orgID, apiCfg.cookie, apiCfg.baseURL)
-		if err == nil {
-			// API succeeded: write utilization values directly.
-			writeCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-			defer cancel()
+		httpClient := buildHTTPDoer(apiCfg.baseURL, log)
+		if httpClient != nil {
+			usage, err := anthropicapi.FetchUsage(ctx, httpClient, apiCfg.orgID, apiCfg.cookie, apiCfg.baseURL)
+			if err == nil {
+				// API succeeded: write utilization values directly.
+				writeCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+				defer cancel()
 
-			pipe := client.Pipeline()
-			pipe.Set(writeCtx, "claude:mesh:usage:pct:5h", fmt.Sprintf("%.4f", usage.FiveHour.Utilization), ttl)
-			pipe.Set(writeCtx, "claude:mesh:usage:pct:week", fmt.Sprintf("%.4f", usage.SevenDay.Utilization), ttl)
-			pipe.Set(writeCtx, "claude:mesh:usage:plan", plan.Tier, ttl)
-			pipe.Set(writeCtx, "claude:mesh:usage:source", "anthropic", ttl)
-			pipe.Set(writeCtx, "claude:mesh:usage:resets_at:5h", usage.FiveHour.ResetsAt.Format(time.RFC3339), ttl)
-			pipe.Set(writeCtx, "claude:mesh:usage:resets_at:week", usage.SevenDay.ResetsAt.Format(time.RFC3339), ttl)
+				pipe := client.Pipeline()
+				pipe.Set(writeCtx, "claude:mesh:usage:pct:5h", fmt.Sprintf("%.4f", usage.FiveHour.Utilization), ttl)
+				pipe.Set(writeCtx, "claude:mesh:usage:pct:week", fmt.Sprintf("%.4f", usage.SevenDay.Utilization), ttl)
+				pipe.Set(writeCtx, "claude:mesh:usage:plan", plan.Tier, ttl)
+				pipe.Set(writeCtx, "claude:mesh:usage:source", "anthropic", ttl)
+				pipe.Set(writeCtx, "claude:mesh:usage:resets_at:5h", usage.FiveHour.ResetsAt.Format(time.RFC3339), ttl)
+				pipe.Set(writeCtx, "claude:mesh:usage:resets_at:week", usage.SevenDay.ResetsAt.Format(time.RFC3339), ttl)
 
-			if _, err := pipe.Exec(writeCtx); err != nil {
-				log.Warn("usage poll: redis write (anthropic) failed", zap.Error(err))
+				if _, err := pipe.Exec(writeCtx); err != nil {
+					log.Warn("usage poll: redis write (anthropic) failed", zap.Error(err))
+					return
+				}
+
+				log.Debug("usage poll: anthropic api ok",
+					zap.Float64("pct_5h", usage.FiveHour.Utilization),
+					zap.Float64("pct_week", usage.SevenDay.Utilization),
+				)
 				return
 			}
 
-			log.Debug("usage poll: anthropic api ok",
-				zap.Float64("pct_5h", usage.FiveHour.Utilization),
-				zap.Float64("pct_week", usage.SevenDay.Utilization),
-			)
-			return
-		}
-
-		// API failed — log and fall through to JSONL.
-		if errors.Is(err, anthropicapi.ErrAuthFailed) {
-			log.Warn("usage poll: anthropic api auth failed (cookie expired?), falling back to JSONL")
-		} else {
-			log.Warn("usage poll: anthropic api error, falling back to JSONL", zap.Error(err))
+			// API failed — log and fall through to JSONL.
+			if errors.Is(err, anthropicapi.ErrAuthFailed) {
+				log.Warn("usage poll: anthropic api auth failed (cookie expired?), falling back to JSONL")
+			} else {
+				log.Warn("usage poll: anthropic api error, falling back to JSONL", zap.Error(err))
+			}
 		}
 	}
 
