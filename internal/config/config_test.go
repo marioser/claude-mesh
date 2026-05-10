@@ -123,6 +123,43 @@ func TestEnvOverrides(t *testing.T) {
 	}
 }
 
+// TestAnthropicAPIDefaultsEmpty verifies that Anthropic API config defaults to empty
+// (API disabled by default — requires explicit opt-in).
+func TestAnthropicAPIDefaultsEmpty(t *testing.T) {
+	unsetEnv(t, allEnvKeys...)
+	t.Setenv("CLAUDE_MESH_ANTHROPIC_ORG_ID", "")
+	t.Setenv("CLAUDE_MESH_ANTHROPIC_COOKIE", "")
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("Load() returned unexpected error: %v", err)
+	}
+	if cfg.AnthropicOrgID != "" {
+		t.Errorf("AnthropicOrgID: got %q, want empty string", cfg.AnthropicOrgID)
+	}
+	if cfg.AnthropicCookie != "" {
+		t.Errorf("AnthropicCookie: got %q, want empty string", cfg.AnthropicCookie)
+	}
+}
+
+// TestAnthropicAPIEnvOverrides verifies that Anthropic API env vars are loaded correctly.
+func TestAnthropicAPIEnvOverrides(t *testing.T) {
+	unsetEnv(t, allEnvKeys...)
+	t.Setenv("CLAUDE_MESH_ANTHROPIC_ORG_ID", "a121f458-69ad-40e4-b720-5d3b1798cb90")
+	t.Setenv("CLAUDE_MESH_ANTHROPIC_COOKIE", "session=abc123; intercom=xyz")
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("Load() returned unexpected error: %v", err)
+	}
+	if cfg.AnthropicOrgID != "a121f458-69ad-40e4-b720-5d3b1798cb90" {
+		t.Errorf("AnthropicOrgID: got %q", cfg.AnthropicOrgID)
+	}
+	if cfg.AnthropicCookie != "session=abc123; intercom=xyz" {
+		t.Errorf("AnthropicCookie: got %q", cfg.AnthropicCookie)
+	}
+}
+
 // allEnvKeys lists every env var consumed by the config package.
 var allEnvKeys = []string{
 	"CLAUDE_MESH_MQTT_HOST",
@@ -142,6 +179,8 @@ var allEnvKeys = []string{
 	"CLAUDE_MESH_HANDLER_TIMEOUT_MS",
 	"CLAUDE_MESH_LOG_PATH",
 	"CLAUDE_MESH_LOG_LEVEL",
+	"CLAUDE_MESH_ANTHROPIC_ORG_ID",
+	"CLAUDE_MESH_ANTHROPIC_COOKIE",
 }
 
 // unsetEnv clears all specified env vars and restores them via t.Cleanup.

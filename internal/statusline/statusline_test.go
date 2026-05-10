@@ -55,6 +55,7 @@ type usageStore struct {
 	pct5h   float64
 	pctWeek float64
 	plan    string
+	source  string // "anthropic" | "local" | ""
 }
 
 func (u *usageStore) GetFloat(_ context.Context, key string) (float64, error) {
@@ -81,8 +82,15 @@ func (u *usageStore) GetInt(_ context.Context, key string) (int, error) {
 }
 
 func (u *usageStore) GetString(_ context.Context, key string) (string, error) {
-	if key == "claude:mesh:usage:plan" && u.plan != "" {
-		return u.plan, nil
+	switch key {
+	case "claude:mesh:usage:plan":
+		if u.plan != "" {
+			return u.plan, nil
+		}
+	case "claude:mesh:usage:source":
+		if u.source != "" {
+			return u.source, nil
+		}
 	}
 	return "", errors.New("key not found")
 }
@@ -717,5 +725,59 @@ func TestRenderUsageBlockIconThresholds(t *testing.T) {
 			t.Errorf("Threshold pct5h=%.0f pctWeek=%.0f: want icon %q in block %q (full: %q)",
 				tc.pct5h, tc.pctWeek, tc.wantIcon, region, line)
 		}
+	}
+}
+
+// TestRenderUsageLocalSourceShowsTilde verifies that when source is "local",
+// the 📊 block appends ~ to both percentages (approximation indicator).
+func TestRenderUsageLocalSourceShowsTilde(t *testing.T) {
+	s := &usageStore{
+		fakeStore: fakeStore{sessionCount: 1},
+		pct5h:     24.0,
+		pctWeek:   12.0,
+		plan:      "max20",
+		source:    "local",
+	}
+	in := statusline.Input{Cwd: "/test"}
+	line := statusline.Render(context.Background(), s, "develop", in, zeroUsage())
+
+	// Must contain "~24%" and "~12%".
+	if !strings.Contains(line, "~24%") {
+		t.Errorf("local source: want '~24%%' in %q", line)
+	}
+	if !strings.Contains(line, "~12%") {
+		t.Errorf("local source: want '~12%%' in %q", line)
+	}
+	// Must NOT contain bare "24%" without tilde.
+	// After "~24%" is found, the plain "24%" will also be there (it's a substring),
+	// but "Sesión 24%" without tilde must not appear.
+	if strings.Contains(line, "Sesión 24%") {
+		t.Errorf("local source: must not contain 'Sesión 24%%' (no tilde) in %q", line)
+	}
+}
+
+// TestRenderUsageAnthropicSourceNoTilde verifies that when source is "anthropic",
+// the 📊 block shows plain percentages without ~.
+func TestRenderUsageAnthropicSourceNoTilde(t *testing.T) {
+	s := &usageStore{
+		fakeStore: fakeStore{sessionCount: 1},
+		pct5h:     23.0,
+		pctWeek:   12.0,
+		plan:      "max20",
+		source:    "anthropic",
+	}
+	in := statusline.Input{Cwd: "/test"}
+	line := statusline.Render(context.Background(), s, "develop", in, zeroUsage())
+
+	// Must contain "Sesión 23%" without tilde.
+	if !strings.Contains(line, "Sesión 23%") {
+		t.Errorf("anthropic source: want 'Sesión 23%%' in %q", line)
+	}
+	if !strings.Contains(line, "Semana 12%") {
+		t.Errorf("anthropic source: want 'Semana 12%%' in %q", line)
+	}
+	// Must NOT contain tilde.
+	if strings.Contains(line, "~23%") || strings.Contains(line, "~12%") {
+		t.Errorf("anthropic source: must not contain tilde in %q", line)
 	}
 }

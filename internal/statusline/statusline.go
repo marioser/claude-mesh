@@ -27,10 +27,11 @@ const (
 	windowMs = 5 * 60 * 1000 // 5 minutes in milliseconds
 
 	// Redis keys written by the usage poll goroutine in the daemon.
-	usageKeyPct5h   = "claude:mesh:usage:pct:5h"
-	usageKeyPctWeek = "claude:mesh:usage:pct:week"
+	usageKeyPct5h    = "claude:mesh:usage:pct:5h"
+	usageKeyPctWeek  = "claude:mesh:usage:pct:week"
 	usageKeyTokens5h = "claude:mesh:usage:tokens:5h"
-	usageKeyPlan    = "claude:mesh:usage:plan"
+	usageKeyPlan     = "claude:mesh:usage:plan"
+	usageKeySource   = "claude:mesh:usage:source"
 )
 
 // PlanUsage holds the usage percentages read from Redis (written by the daemon poll loop).
@@ -40,6 +41,10 @@ type PlanUsage struct {
 	PctWeek  float64 // 0..100 — percentage of 7-day rolling window consumed
 	Tokens5h int     // raw tokens in the 5h window
 	Plan     string  // plan tier, e.g. "max20"
+	// Source is "anthropic" when data comes from the claude.ai usage API,
+	// "local" when derived from JSONL transcript parsing (approximate).
+	// Empty means the daemon hasn't computed stats yet.
+	Source string
 }
 
 // ReadUsage reads plan usage data from Redis with a 30ms timeout.
@@ -60,12 +65,14 @@ func ReadUsage(ctx context.Context, s store.Store) PlanUsage {
 	// Best-effort fields — ignore errors.
 	tokens5h, _ := s.GetInt(rctx, usageKeyTokens5h)
 	plan, _ := s.GetString(rctx, usageKeyPlan)
+	source, _ := s.GetString(rctx, usageKeySource)
 
 	return PlanUsage{
 		Pct5h:    pct5h,
 		PctWeek:  pctWeek,
 		Tokens5h: tokens5h,
 		Plan:     plan,
+		Source:   source,
 	}
 }
 
@@ -165,7 +172,13 @@ func Render(ctx context.Context, s store.Store, branch string, in Input, u conte
 }
 
 // usagePart formats the 📊 plan usage block.
-// Format: "📊 🟢 Sesión X% Semana Y%"
+//
+// When source is "local" (JSONL-derived approximation), percentages are prefixed
+// with "~" to indicate they are estimates:
+//
+//	"📊 🟢 Sesión ~24% Semana ~12%"  ← local
+//	"📊 🟢 Sesión 23% Semana 12%"    ← anthropic (exact)
+//
 // Returns empty string if both percentages are zero (data not yet computed by daemon).
 func usagePart(pu PlanUsage) string {
 	if pu.Pct5h == 0 && pu.PctWeek == 0 {
@@ -179,6 +192,11 @@ func usagePart(pu PlanUsage) string {
 	icon := contextIcon(maxPct)
 	pct5h := int(pu.Pct5h + 0.5)
 	pctWeek := int(pu.PctWeek + 0.5)
+
+	// Append ~ prefix when source is local (approximate).
+	if pu.Source == "local" {
+		return fmt.Sprintf("📊 %s Sesión ~%d%% Semana ~%d%%", icon, pct5h, pctWeek)
+	}
 	return fmt.Sprintf("📊 %s Sesión %d%% Semana %d%%", icon, pct5h, pctWeek)
 }
 

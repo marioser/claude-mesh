@@ -35,6 +35,13 @@ type EnvOptions struct {
 	// Logging.
 	LogPath  string `env:"CLAUDE_MESH_LOG_PATH"  envDefault:"~/Library/Logs/claude-mesh-bridge.log"`
 	LogLevel string `env:"CLAUDE_MESH_LOG_LEVEL" envDefault:"info"`
+
+	// Anthropic usage API (optional).
+	// When both fields are set, the daemon uses the official claude.ai usage API
+	// as the primary source for 5h and weekly token percentages.
+	// When empty (default), the daemon falls back to local JSONL parsing.
+	AnthropicOrgID  string `env:"CLAUDE_MESH_ANTHROPIC_ORG_ID"  envDefault:""`
+	AnthropicCookie string `env:"CLAUDE_MESH_ANTHROPIC_COOKIE"  envDefault:""`
 }
 
 // Load parses environment variables into EnvOptions and returns an error if any

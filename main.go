@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -17,6 +18,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"claude-mesh/internal/anthropicapi"
 	"claude-mesh/internal/bridge"
 	"claude-mesh/internal/config"
 	"claude-mesh/internal/contextusage"
@@ -31,6 +33,15 @@ import (
 
 	"github.com/redis/go-redis/v9"
 )
+
+// anthropicAPICfg holds optional Anthropic API credentials for the usage primary source.
+// When orgID and cookie are both non-empty, the daemon uses the API instead of JSONL parsing.
+// baseURL is used in tests to override the real endpoint; in production it should be "".
+type anthropicAPICfg struct {
+	orgID   string
+	cookie  string
+	baseURL string // empty → uses real claude.ai endpoint
+}
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
@@ -168,9 +179,15 @@ func runBridge(_ []string) error {
 
 	// Start the usage tracking poll goroutine.
 	// It scans ~/.claude/projects/ every 60s and writes stats to Redis.
+	// If CLAUDE_MESH_ANTHROPIC_ORG_ID + CLAUDE_MESH_ANTHROPIC_COOKIE are set,
+	// the Anthropic usage API is used as primary source instead of JSONL parsing.
 	projectsDir := claudeProjectsDir()
 	plan := usagestats.ResolveFromEnv()
-	go runUsagePoll(ctx, redisClient, projectsDir, plan, log)
+	apiCfg := anthropicAPICfg{
+		orgID:  cfg.AnthropicOrgID,
+		cookie: cfg.AnthropicCookie,
+	}
+	go runUsagePoll(ctx, redisClient, projectsDir, plan, log, apiCfg)
 
 	b.Run(ctx)
 	return nil
@@ -182,10 +199,11 @@ func claudeProjectsDir() string {
 	return filepath.Join(home, ".claude", "projects")
 }
 
-// runUsagePoll runs the usage tracking loop. It polls every 60s, scans JSONL transcripts,
-// and writes stats to Redis with a 120s TTL. Errors are logged but never crash the daemon.
-func runUsagePoll(ctx context.Context, client *redis.Client, projectsDir string, plan usagestats.Plan, log *zap.Logger) {
-	pollUsageOnce(ctx, client, projectsDir, plan, log)
+// runUsagePoll runs the usage tracking loop. It polls every 60s, scans JSONL transcripts
+// (or uses the Anthropic API if configured), and writes stats to Redis with a 120s TTL.
+// Errors are logged but never crash the daemon.
+func runUsagePoll(ctx context.Context, client *redis.Client, projectsDir string, plan usagestats.Plan, log *zap.Logger, apiCfg anthropicAPICfg) {
+	pollUsageOnce(ctx, client, projectsDir, plan, log, apiCfg)
 
 	ticker := time.NewTicker(60 * time.Second)
 	defer ticker.Stop()
@@ -195,13 +213,59 @@ func runUsagePoll(ctx context.Context, client *redis.Client, projectsDir string,
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			pollUsageOnce(ctx, client, projectsDir, plan, log)
+			pollUsageOnce(ctx, client, projectsDir, plan, log, apiCfg)
 		}
 	}
 }
 
 // pollUsageOnce executes one usage scan+compute+write cycle.
-func pollUsageOnce(ctx context.Context, client *redis.Client, projectsDir string, plan usagestats.Plan, log *zap.Logger) {
+//
+// When apiCfg.orgID and apiCfg.cookie are both non-empty, it first attempts to
+// fetch usage from the Anthropic API. On success the percentages come directly
+// from the API's "utilization" fields (already 0-100) and the source key is
+// written as "anthropic". On 401/any error it falls through to the JSONL path.
+// When the API is not configured, or after any fallback, source is "local".
+func pollUsageOnce(ctx context.Context, client *redis.Client, projectsDir string, plan usagestats.Plan, log *zap.Logger, apiCfg anthropicAPICfg) {
+	const ttl = 120 * time.Second
+
+	// --- Primary source: Anthropic API ---
+	if apiCfg.orgID != "" && apiCfg.cookie != "" {
+		httpClient := &http.Client{Timeout: 10 * time.Second}
+		usage, err := anthropicapi.FetchUsage(ctx, httpClient, apiCfg.orgID, apiCfg.cookie, apiCfg.baseURL)
+		if err == nil {
+			// API succeeded: write utilization values directly.
+			writeCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+			defer cancel()
+
+			pipe := client.Pipeline()
+			pipe.Set(writeCtx, "claude:mesh:usage:pct:5h", fmt.Sprintf("%.4f", usage.FiveHour.Utilization), ttl)
+			pipe.Set(writeCtx, "claude:mesh:usage:pct:week", fmt.Sprintf("%.4f", usage.SevenDay.Utilization), ttl)
+			pipe.Set(writeCtx, "claude:mesh:usage:plan", plan.Tier, ttl)
+			pipe.Set(writeCtx, "claude:mesh:usage:source", "anthropic", ttl)
+			pipe.Set(writeCtx, "claude:mesh:usage:resets_at:5h", usage.FiveHour.ResetsAt.Format(time.RFC3339), ttl)
+			pipe.Set(writeCtx, "claude:mesh:usage:resets_at:week", usage.SevenDay.ResetsAt.Format(time.RFC3339), ttl)
+
+			if _, err := pipe.Exec(writeCtx); err != nil {
+				log.Warn("usage poll: redis write (anthropic) failed", zap.Error(err))
+				return
+			}
+
+			log.Debug("usage poll: anthropic api ok",
+				zap.Float64("pct_5h", usage.FiveHour.Utilization),
+				zap.Float64("pct_week", usage.SevenDay.Utilization),
+			)
+			return
+		}
+
+		// API failed — log and fall through to JSONL.
+		if errors.Is(err, anthropicapi.ErrAuthFailed) {
+			log.Warn("usage poll: anthropic api auth failed (cookie expired?), falling back to JSONL")
+		} else {
+			log.Warn("usage poll: anthropic api error, falling back to JSONL", zap.Error(err))
+		}
+	}
+
+	// --- Fallback source: local JSONL parsing ---
 	since := time.Now().Add(-7 * 24 * time.Hour)
 	entries, err := usagestats.ScanProjects(projectsDir, since)
 	if err != nil {
@@ -227,7 +291,6 @@ func pollUsageOnce(ctx context.Context, client *redis.Client, projectsDir string
 		}
 	}
 
-	const ttl = 120 * time.Second
 	writeCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 
@@ -239,13 +302,14 @@ func pollUsageOnce(ctx context.Context, client *redis.Client, projectsDir string
 	pipe.Set(writeCtx, "claude:mesh:usage:limit:5h", plan.Limit5h, ttl)
 	pipe.Set(writeCtx, "claude:mesh:usage:limit:week", plan.LimitWeek, ttl)
 	pipe.Set(writeCtx, "claude:mesh:usage:plan", plan.Tier, ttl)
+	pipe.Set(writeCtx, "claude:mesh:usage:source", "local", ttl)
 
 	if _, err := pipe.Exec(writeCtx); err != nil {
 		log.Warn("usage poll: redis write failed", zap.Error(err))
 		return
 	}
 
-	log.Debug("usage poll: ok",
+	log.Debug("usage poll: ok (local)",
 		zap.Int("tokens_5h", tokens5h),
 		zap.Int("tokens_week", tokensWeek),
 		zap.Float64("pct_5h", pct5h),
