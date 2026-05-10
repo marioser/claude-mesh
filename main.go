@@ -22,6 +22,7 @@ import (
 	"claude-mesh/internal/logging"
 	mqttclient "claude-mesh/internal/mqtt"
 	"claude-mesh/internal/publisher"
+	"claude-mesh/internal/statusline"
 	"claude-mesh/internal/store"
 
 	"github.com/redis/go-redis/v9"
@@ -71,6 +72,8 @@ func run(args []string) error {
 		return runUninstall(remaining[1:])
 	case "status":
 		return runStatus(remaining[1:])
+	case "statusline":
+		return runStatusline(remaining[1:])
 	case "help", "--help", "-h":
 		usage()
 		return nil
@@ -217,6 +220,50 @@ func storeConfig(cfg config.EnvOptions) store.StoreConfig {
 	}
 }
 
+// runStatusline prints a single-line status string suitable for Claude Code's statusLine config.
+// Performance budget: <100ms p95. Redis is queried with a 50ms timeout; any failure returns
+// a minimal fallback line silently (no stderr output — Claude Code would show it to the user).
+func runStatusline(_ []string) error {
+	cfg, err := config.Load()
+	if err != nil {
+		// Config load failure is not fatal — print minimal line and exit 0.
+		fmt.Println("🌳 - │ ⚪ daemon down")
+		return nil
+	}
+
+	// Resolve git branch with a 100ms timeout.
+	branch := gitBranch()
+
+	// Connect to Redis with a total budget of 50ms (enforced inside statusline.Render).
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	redisClient := redis.NewClient(&redis.Options{
+		Addr:     cfg.RedisAddr,
+		Password: cfg.RedisPassword,
+		DB:       cfg.RedisDB,
+	})
+	defer func() { _ = redisClient.Close() }()
+
+	s := store.NewRedisStore(redisClient, storeConfig(cfg))
+	line := statusline.Render(ctx, s, branch)
+	fmt.Println(line)
+	return nil
+}
+
+// gitBranch returns the current git branch name for the working directory.
+// Returns "" if not in a git repo or git is unavailable.
+func gitBranch() string {
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", "branch", "--show-current")
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
 func usage() {
 	fmt.Fprint(os.Stderr, `claude-mesh-bridge - MIOBOX Claude Mesh observability daemon
 
@@ -226,6 +273,7 @@ Usage:
   claude-mesh-bridge install                     Install hooks, launchd agent, and MCP entry
   claude-mesh-bridge uninstall                   Remove all Claude Mesh installations
   claude-mesh-bridge status [--json]             Print daemon/Redis/MQTT health
+  claude-mesh-bridge statusline                  Print one-line status for Claude Code statusLine
   claude-mesh-bridge --ensure-running            Kickstart daemon if not running
 
 Event types for publish:

@@ -213,6 +213,25 @@ func TestIntegrationInstall(t *testing.T) {
 		}
 	})
 
+	t.Run("settings_json_has_statusline_entry", func(t *testing.T) {
+		raw, err := os.ReadFile(p.SettingsJSON)
+		if err != nil {
+			t.Fatalf("read settings.json: %v", err)
+		}
+		var settings map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &settings); err != nil {
+			t.Fatalf("unmarshal settings.json: %v", err)
+		}
+		slRaw, ok := settings["statusLine"]
+		if !ok {
+			t.Fatal("statusLine key missing from settings.json after install")
+		}
+		wantCmd := p.BridgeBin + " statusline"
+		if !strings.Contains(string(slRaw), wantCmd) {
+			t.Errorf("statusLine command = %s, want to contain %q", slRaw, wantCmd)
+		}
+	})
+
 	t.Run("neurostack_hook_untouched", func(t *testing.T) {
 		raw, _ := os.ReadFile(p.SettingsJSON)
 		if !strings.Contains(string(raw), "neurostack-session-context") {
@@ -268,6 +287,20 @@ func TestIntegrationUninstall(t *testing.T) {
 		}
 		if strings.Contains(string(raw), "claude-mesh-") {
 			t.Errorf("settings.json still contains claude-mesh-* entries after uninstall:\n%s", raw)
+		}
+	})
+
+	t.Run("settings_json_has_no_statusline_entry", func(t *testing.T) {
+		raw, err := os.ReadFile(p.SettingsJSON)
+		if err != nil {
+			t.Fatalf("read settings.json after uninstall: %v", err)
+		}
+		var settings map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &settings); err != nil {
+			t.Fatalf("unmarshal settings.json: %v", err)
+		}
+		if _, ok := settings["statusLine"]; ok {
+			t.Errorf("statusLine still present in settings.json after uninstall:\n%s", raw)
 		}
 	})
 

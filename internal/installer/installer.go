@@ -130,9 +130,12 @@ func Install(p Paths) error {
 		}
 	}
 
-	// 3. Patch settings.json with stable hooks dir.
+	// 3. Patch settings.json with stable hooks dir and statusLine entry.
 	if err := PatchSettings(p.SettingsJSON, p.BridgeBin, p.HooksDir); err != nil {
 		return fmt.Errorf("installer: patch settings.json: %w", err)
+	}
+	if err := PatchStatusLine(p.SettingsJSON, p.BridgeBin); err != nil {
+		return fmt.Errorf("installer: patch statusLine: %w", err)
 	}
 
 	// 4. Patch .mcp.json with stable MCP bin + env vars.
@@ -185,9 +188,12 @@ func Uninstall(p Paths) error {
 		}
 	}
 
-	// Remove hooks from settings.json.
+	// Remove hooks and statusLine from settings.json.
 	if err := RemoveHooks(p.SettingsJSON); err != nil {
 		fmt.Fprintf(os.Stderr, "claude-mesh uninstall: remove hooks: %v (continuing)\n", err)
+	}
+	if err := RemoveStatusLine(p.SettingsJSON, p.BridgeBin); err != nil {
+		fmt.Fprintf(os.Stderr, "claude-mesh uninstall: remove statusLine: %v (continuing)\n", err)
 	}
 
 	// Remove MCP entry from .mcp.json.
