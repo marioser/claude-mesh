@@ -30,7 +30,7 @@ type StoreConfig struct {
 // DefaultConfig returns the design-specified default TTLs and ring sizes.
 func DefaultConfig() StoreConfig {
 	return StoreConfig{
-		SessionTTL:         90,
+		SessionTTL:         600,
 		ActivityPerSessTTL: 600,
 		ActivityGlobalTTL:  1800,
 		ActivityRingSize:   50,

@@ -20,7 +20,7 @@ type EnvOptions struct {
 	RedisDB       int    `env:"CLAUDE_MESH_REDIS_DB"       envDefault:"0"`
 
 	// Redis TTLs (seconds).
-	SessionTTL         int `env:"CLAUDE_MESH_SESSION_TTL_S"  envDefault:"90"`
+	SessionTTL         int `env:"CLAUDE_MESH_SESSION_TTL_S"  envDefault:"600"`
 	ActivityPerSessTTL int `env:"CLAUDE_MESH_ACTIVITY_TTL_S" envDefault:"600"`
 	ActivityGlobalTTL  int `env:"CLAUDE_MESH_GLOBAL_TTL_S"   envDefault:"1800"`
 	ActivityRingSize   int `env:"CLAUDE_MESH_RING_SIZE"      envDefault:"50"`

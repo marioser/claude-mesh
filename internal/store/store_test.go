@@ -346,6 +346,128 @@ func TestPushActivityUnknownSession(t *testing.T) {
 	}
 }
 
+// newTestStoreWithRedis returns a Store and the raw *redis.Client so tests can
+// inspect Redis state (e.g. TTL) that the Store interface does not expose.
+func newTestStoreWithRedis(t *testing.T) (store.Store, *redis.Client) {
+	t.Helper()
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("miniredis.Run: %v", err)
+	}
+	t.Cleanup(mr.Close)
+
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { _ = client.Close() })
+
+	return store.NewRedisStore(client, store.DefaultConfig()), client
+}
+
+// TestPushActivityAutoRegistersNewSession verifies that an activity event for a session
+// that was never explicitly opened (no SessionOpen) still registers the session in the
+// active ZSET so it can be listed via ListActiveSessions.
+func TestPushActivityAutoRegistersNewSession(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	act := events.Activity{
+		Ts:        nowMs(),
+		SessionID: "auto-reg-new",
+		Tool:      "Bash",
+		Target:    "echo hi",
+		Cwd:       "/tmp",
+	}
+
+	if err := s.PushActivity(ctx, act); err != nil {
+		t.Fatalf("PushActivity: %v", err)
+	}
+
+	sessions, err := s.ListActiveSessions(ctx)
+	if err != nil {
+		t.Fatalf("ListActiveSessions: %v", err)
+	}
+
+	found := false
+	for _, sess := range sessions {
+		if sess.ID == act.SessionID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("session %q not in active ZSET after activity event on never-opened session", act.SessionID)
+	}
+}
+
+// TestPushActivityUpdatesZSETScore verifies that an activity event for an already-open
+// session updates its ZSET score to the activity's Ts (refreshing its rank in the set).
+func TestPushActivityUpdatesZSETScore(t *testing.T) {
+	s, client := newTestStoreWithRedis(t)
+	ctx := context.Background()
+
+	openTs := nowMs()
+	ev := events.SessionOpen{
+		Ts: openTs, SessionID: "score-update-sess", Cwd: "/p", Host: "h", PID: 1,
+	}
+	if err := s.OpenSession(ctx, ev); err != nil {
+		t.Fatalf("OpenSession: %v", err)
+	}
+
+	laterTs := openTs + 30_000 // 30 seconds later
+	act := events.Activity{
+		Ts:        laterTs,
+		SessionID: ev.SessionID,
+		Tool:      "Edit",
+		Target:    "main.go",
+		Cwd:       "/p",
+	}
+	if err := s.PushActivity(ctx, act); err != nil {
+		t.Fatalf("PushActivity: %v", err)
+	}
+
+	// Check ZSET score updated to laterTs.
+	score, err := client.ZScore(ctx, "claude:mesh:sessions:active", ev.SessionID).Result()
+	if err != nil {
+		t.Fatalf("ZScore: %v", err)
+	}
+	if score != laterTs {
+		t.Errorf("ZSET score: got %v, want %v (laterTs)", score, laterTs)
+	}
+}
+
+// TestPushActivityRefreshesSessionHashTTL verifies that PushActivity refreshes the
+// session Hash TTL to the configured SessionTTL (600s) so idle sessions stay visible.
+func TestPushActivityRefreshesSessionHashTTL(t *testing.T) {
+	s, client := newTestStoreWithRedis(t)
+	ctx := context.Background()
+
+	ev := events.SessionOpen{
+		Ts: nowMs(), SessionID: "ttl-refresh-sess", Cwd: "/p", Host: "h", PID: 1,
+	}
+	if err := s.OpenSession(ctx, ev); err != nil {
+		t.Fatalf("OpenSession: %v", err)
+	}
+
+	act := events.Activity{
+		Ts:        nowMs() + 5_000,
+		SessionID: ev.SessionID,
+		Tool:      "Read",
+		Target:    "go.mod",
+		Cwd:       "/p",
+	}
+	if err := s.PushActivity(ctx, act); err != nil {
+		t.Fatalf("PushActivity: %v", err)
+	}
+
+	ttl, err := client.TTL(ctx, "claude:mesh:session:"+ev.SessionID).Result()
+	if err != nil {
+		t.Fatalf("TTL: %v", err)
+	}
+	// TTL should be within [590s, 600s] — freshly set to SessionTTL=600.
+	if ttl.Seconds() < 590 || ttl.Seconds() > 600 {
+		t.Errorf("session hash TTL after PushActivity: got %v, want ~600s", ttl)
+	}
+}
+
 // Ensure json round-trip of SessionView works (used by ListActiveSessions internals).
 func TestSessionViewJSONSerde(t *testing.T) {
 	view := store.SessionView{

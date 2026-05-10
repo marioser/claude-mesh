@@ -26,7 +26,7 @@ func TestDefaultValues(t *testing.T) {
 		{"MQTTClientID", cfg.MQTTClientID, "claude-mesh"},
 		{"RedisAddr", cfg.RedisAddr, "localhost:6379"},
 		{"RedisDB", cfg.RedisDB, 0},
-		{"SessionTTL", cfg.SessionTTL, 90},
+		{"SessionTTL", cfg.SessionTTL, 600},
 		{"ActivityPerSessTTL", cfg.ActivityPerSessTTL, 600},
 		{"ActivityGlobalTTL", cfg.ActivityGlobalTTL, 1800},
 		{"ActivityRingSize", cfg.ActivityRingSize, 50},
