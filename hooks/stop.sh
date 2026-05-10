@@ -54,10 +54,16 @@ if [ -z "${PAYLOAD}" ]; then
     exit 0
 fi
 
-if command -v timeout > /dev/null 2>&1; then
+# Publish with timeout — prefer gtimeout (brew coreutils), then timeout, then no-timeout fallback.
+if command -v gtimeout > /dev/null 2>&1; then
+    echo "${PAYLOAD}" | gtimeout 2s "${BRIDGE_BIN}" publish session-close >> "${LOG_FILE}" 2>&1 || log "publish timeout or failed"
+elif command -v timeout > /dev/null 2>&1; then
     echo "${PAYLOAD}" | timeout 2s "${BRIDGE_BIN}" publish session-close >> "${LOG_FILE}" 2>&1 || log "publish timeout or failed"
 else
     echo "${PAYLOAD}" | perl -e 'alarm(2); exec @ARGV' "${BRIDGE_BIN}" publish session-close >> "${LOG_FILE}" 2>&1 || log "publish failed"
 fi
+
+# Smoke log: proof of execution for debugging session lifecycle.
+log "session closed: session_id=${SESSION_ID}"
 
 exit 0

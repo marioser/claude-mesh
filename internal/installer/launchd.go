@@ -3,6 +3,7 @@ package installer
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"text/template"
 )
 
@@ -65,6 +66,11 @@ func RenderPlist(plistDst, bridgeBin string) error {
 	}
 	_ = tmp.Close()
 
+	// Ensure parent directory exists before rename.
+	if err := os.MkdirAll(filepath.Dir(plistDst), 0o755); err != nil {
+		_ = os.Remove(tmpName)
+		return fmt.Errorf("launchd: create plist dir: %w", err)
+	}
 	if err := os.Rename(tmpName, plistDst); err != nil {
 		_ = os.Remove(tmpName)
 		return fmt.Errorf("launchd: write plist: %w", err)

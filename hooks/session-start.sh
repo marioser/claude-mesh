@@ -57,11 +57,23 @@ if [ -z "${PAYLOAD}" ]; then
 fi
 
 # Publish with timeout — exit 0 regardless of result (never block Claude Code).
-if command -v timeout > /dev/null 2>&1; then
-    echo "${PAYLOAD}" | timeout 3s "${BRIDGE_BIN}" publish session-open >> "${LOG_FILE}" 2>&1 || log "publish timed out or failed"
-else
-    # Fallback: perl timeout
-    echo "${PAYLOAD}" | perl -e 'alarm(3); exec @ARGV' "${BRIDGE_BIN}" publish session-open >> "${LOG_FILE}" 2>&1 || log "publish failed"
-fi
+# Prefer gtimeout (brew coreutils on macOS), then timeout (Linux/some macOS), then no-timeout fallback.
+# Note: the publish command is fast (<1s on local broker) so the no-timeout fallback is safe.
+_publish_with_timeout() {
+    local payload="$1"
+    if command -v gtimeout > /dev/null 2>&1; then
+        echo "${payload}" | gtimeout 3s "${BRIDGE_BIN}" publish session-open >> "${LOG_FILE}" 2>&1
+    elif command -v timeout > /dev/null 2>&1; then
+        echo "${payload}" | timeout 3s "${BRIDGE_BIN}" publish session-open >> "${LOG_FILE}" 2>&1
+    else
+        # No timeout available — run directly (publish is fast on local broker).
+        echo "${payload}" | "${BRIDGE_BIN}" publish session-open >> "${LOG_FILE}" 2>&1
+    fi
+}
+
+_publish_with_timeout "${PAYLOAD}" || log "publish failed or timed out"
+
+# Smoke log: proof of execution for debugging session lifecycle.
+log "session opened: session_id=${SESSION_ID} cwd=${CWD} git_branch=${GIT_BRANCH}"
 
 exit 0
