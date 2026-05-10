@@ -20,6 +20,7 @@ import (
 	"claude-mesh/internal/config"
 	"claude-mesh/internal/contextusage"
 	"claude-mesh/internal/installer"
+	"claude-mesh/internal/lock"
 	"claude-mesh/internal/logging"
 	mqttclient "claude-mesh/internal/mqtt"
 	"claude-mesh/internal/publisher"
@@ -84,7 +85,35 @@ func run(args []string) error {
 	}
 }
 
+// buildSubscriberClientID returns a unique MQTT client_id for the bridge subscriber.
+// Format: <base>-sub-<hostname>-<pid>
+// Using hostname+pid prevents "session taken over" disconnects when 2+ bridge
+// instances run simultaneously (e.g. launchd KeepAlive + manual invocation).
+func buildSubscriberClientID(base string) string {
+	hostname, _ := os.Hostname()
+	if hostname == "" {
+		hostname = "unknown"
+	}
+	return fmt.Sprintf("%s-sub-%s-%d", base, hostname, os.Getpid())
+}
+
 func runBridge(_ []string) error {
+	// --- Instance guard (FIX 2) ---
+	// Prevent multiple bridge daemons from competing over the same MQTT
+	// subscriber client_id and Redis session state. If another live bridge
+	// process is detected, exit 0 silently — launchd KeepAlive will not
+	// re-trigger an immediate restart.
+	lockPath := envOrDefault("CLAUDE_MESH_LOCK_PATH", "/tmp/claude-mesh-bridge.pid")
+	if err := lock.Acquire(lockPath); err != nil {
+		if errors.Is(err, lock.ErrAlreadyHeld) {
+			// Another daemon is alive — exit cleanly without printing anything
+			// to avoid polluting logs with spurious restarts.
+			return nil
+		}
+		return fmt.Errorf("acquire lock: %w", err)
+	}
+	defer func() { _ = lock.Release(lockPath) }()
+
 	cfg, err := config.Load()
 	if err != nil {
 		return fmt.Errorf("config: %w", err)
@@ -96,11 +125,22 @@ func runBridge(_ []string) error {
 	}
 	defer func() { _ = log.Sync() }()
 
+	// --- Unique subscriber client_id (FIX 1) ---
+	clientID := buildSubscriberClientID(cfg.MQTTClientID)
 	broker := fmt.Sprintf("tcp://%s:%d", cfg.MQTTHost, cfg.MQTTPort)
-	mqttClient := mqttclient.NewPahoClient(broker, cfg.MQTTClientID+"-sub", cfg.MQTTUsername, cfg.MQTTPassword)
+
+	// --- Verbose startup logging (FIX 3) ---
+	log.Info("mqtt connecting",
+		zap.String("broker", broker),
+		zap.String("client_id", clientID),
+	)
+
+	mqttClient := mqttclient.NewPahoClient(broker, clientID, cfg.MQTTUsername, cfg.MQTTPassword)
 
 	if err := mqttClient.Connect(context.Background()); err != nil {
 		log.Warn("mqtt connect failed (will retry via AutoReconnect)", zap.Error(err))
+	} else {
+		log.Info("mqtt connected", zap.String("client_id", clientID))
 	}
 	defer mqttClient.Disconnect(500)
 
@@ -119,7 +159,7 @@ func runBridge(_ []string) error {
 	sub := mqttclient.NewSubscriber(mqttClient)
 	b := bridge.New(sub, s, log)
 
-	log.Info("bridge ready")
+	log.Info("bridge ready", zap.String("client_id", clientID), zap.String("lock", lockPath))
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
