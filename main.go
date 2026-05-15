@@ -173,10 +173,15 @@ func runBridge(_ []string) error {
 
 	mqttClient := mqttclient.NewPahoClient(broker, clientID, cfg.MQTTUsername, cfg.MQTTPassword, onConnect)
 
+	// Track the initial connect outcome so we can apply it to the Subscriber once it exists.
+	// The OnConnectHandler race (paho fires it during Connect() before `sub` is assigned)
+	// means the first SetConnected(true) inside the handler is a no-op; we compensate here.
+	initialConnectOK := false
 	if err := mqttClient.Connect(context.Background()); err != nil {
 		log.Warn("mqtt connect failed (will retry via AutoReconnect)", zap.Error(err))
 	} else {
 		log.Info("mqtt connected", zap.String("client_id", clientID))
+		initialConnectOK = true
 	}
 	defer mqttClient.Disconnect(500)
 
@@ -202,6 +207,9 @@ func runBridge(_ []string) error {
 	}
 
 	sub = mqttclient.NewSubscriber(mqttClient)
+	// Apply the initial connect result that the OnConnectHandler missed
+	// because `sub` was nil when paho fired it during Connect().
+	sub.SetConnected(initialConnectOK)
 	b := bridge.New(sub, s, log)
 
 	log.Info("bridge ready", zap.String("client_id", clientID), zap.String("lock", lockPath))
