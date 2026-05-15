@@ -535,6 +535,64 @@ func TestGetInt(t *testing.T) {
 	}
 }
 
+// TestTouchActiveSessions verifies that TouchActiveSessions resets all ZSET scores to
+// the given nowMs so the sweep ticker does not evict them immediately after a restart.
+func TestTouchActiveSessions(t *testing.T) {
+	s, client := newTestStoreWithRedis(t)
+	ctx := context.Background()
+
+	// Insert two sessions with a stale (2-minute-old) score.
+	staleTs := float64(time.Now().Add(-2 * time.Minute).UnixMilli())
+	for _, id := range []string{"rehydrate-1", "rehydrate-2"} {
+		ev := events.SessionOpen{Ts: staleTs, SessionID: id, Cwd: "/p", Host: "h", PID: 1}
+		if err := s.OpenSession(ctx, ev); err != nil {
+			t.Fatalf("OpenSession(%s): %v", id, err)
+		}
+	}
+
+	before := float64(time.Now().UnixMilli())
+	_, err := s.TouchActiveSessions(ctx, before)
+	if err != nil {
+		t.Fatalf("TouchActiveSessions: %v", err)
+	}
+
+	// Both members must have score >= before (the nowMs we passed in).
+	for _, id := range []string{"rehydrate-1", "rehydrate-2"} {
+		score, err := client.ZScore(ctx, "claude:mesh:sessions:active", id).Result()
+		if err != nil {
+			t.Fatalf("ZScore(%s): %v", id, err)
+		}
+		if score < before {
+			t.Errorf("session %s score %v < before %v: score was not refreshed", id, score, before)
+		}
+	}
+
+	// A sweep with the original stale cutoff must NOT remove them now.
+	cutoff := float64(time.Now().Add(-90 * time.Second).UnixMilli())
+	removed, err := s.SweepExpired(ctx, cutoff)
+	if err != nil {
+		t.Fatalf("SweepExpired: %v", err)
+	}
+	if removed != 0 {
+		t.Errorf("SweepExpired removed %d sessions that should have been rehydrated", removed)
+	}
+}
+
+// TestTouchActiveSessionsEmpty verifies that TouchActiveSessions on an empty ZSET
+// returns 0 and no error.
+func TestTouchActiveSessionsEmpty(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	n, err := s.TouchActiveSessions(ctx, float64(time.Now().UnixMilli()))
+	if err != nil {
+		t.Fatalf("TouchActiveSessions empty: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("expected 0 touched, got %d", n)
+	}
+}
+
 // Ensure json round-trip of SessionView works (used by ListActiveSessions internals).
 func TestSessionViewJSONSerde(t *testing.T) {
 	view := store.SessionView{

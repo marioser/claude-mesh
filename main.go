@@ -148,7 +148,30 @@ func runBridge(_ []string) error {
 		zap.String("client_id", clientID),
 	)
 
-	mqttClient := mqttclient.NewPahoClient(broker, clientID, cfg.MQTTUsername, cfg.MQTTPassword)
+	// Bug 2 fix: create the Subscriber first so the OnConnectHandler closure can
+	// capture it and re-issue Subscribe on every paho reconnect. The handler runs on
+	// paho's internal network goroutine — it MUST NOT block, so it spawns a goroutine.
+	var sub *mqttclient.Subscriber // forward declaration; populated after mqttClient is created
+
+	onConnect := func() {
+		log.Info("mqtt reconnected, resubscribing", zap.String("client_id", clientID))
+		// IMPORTANT: This callback runs on paho's internal network goroutine.
+		// We MUST NOT block here — spawn a goroutine for anything that can block.
+		go func() {
+			if sub == nil {
+				return // bridge not yet constructed (extremely unlikely race)
+			}
+			sub.SetConnected(true)
+			ctx := context.Background()
+			if err := sub.ResubscribeOnReconnect(ctx); err != nil {
+				log.Warn("mqtt resubscribe after reconnect failed", zap.Error(err))
+			} else {
+				log.Info("mqtt resubscribed successfully after reconnect", zap.String("client_id", clientID))
+			}
+		}()
+	}
+
+	mqttClient := mqttclient.NewPahoClient(broker, clientID, cfg.MQTTUsername, cfg.MQTTPassword, onConnect)
 
 	if err := mqttClient.Connect(context.Background()); err != nil {
 		log.Warn("mqtt connect failed (will retry via AutoReconnect)", zap.Error(err))
@@ -169,7 +192,16 @@ func runBridge(_ []string) error {
 		return fmt.Errorf("redis unreachable: %w", err)
 	}
 
-	sub := mqttclient.NewSubscriber(mqttClient)
+	// Bug 3 fix: touch all existing active sessions so the sweep ticker does not
+	// evict them in the 90s window following a restart.
+	nowMs := float64(time.Now().UnixMilli())
+	if n, err := s.TouchActiveSessions(context.Background(), nowMs); err != nil {
+		log.Warn("bridge: session rehydration failed", zap.Error(err))
+	} else if n > 0 {
+		log.Info("bridge: rehydrated active sessions", zap.Int("count", n))
+	}
+
+	sub = mqttclient.NewSubscriber(mqttClient)
 	b := bridge.New(sub, s, log)
 
 	log.Info("bridge ready", zap.String("client_id", clientID), zap.String("lock", lockPath))
@@ -354,7 +386,7 @@ func runPublish(eventType string, _ []string) error {
 	broker := fmt.Sprintf("tcp://%s:%d", cfg.MQTTHost, cfg.MQTTPort)
 	// Use pid-suffixed client ID to avoid conflict with the daemon.
 	clientID := cfg.MQTTClientID + "-pub-" + strconv.Itoa(os.Getpid())
-	client := mqttclient.NewPahoClient(broker, clientID, cfg.MQTTUsername, cfg.MQTTPassword)
+	client := mqttclient.NewPahoClient(broker, clientID, cfg.MQTTUsername, cfg.MQTTPassword, nil)
 
 	if err := client.Connect(ctx); err != nil {
 		// Non-fatal: log and exit 0 (hooks must never block).
@@ -397,6 +429,21 @@ func runStatus(_ []string) error {
 		status["redis"] = "unreachable"
 	} else {
 		status["redis"] = "ok"
+	}
+
+	// MQTT health (read from Redis hash written by the bridge each sweep tick).
+	mqttHealth, found, err := s.ReadMQTTHealth(context.Background())
+	if err != nil || !found {
+		status["mqtt"] = map[string]any{"connected": false}
+	} else {
+		status["mqtt"] = map[string]any{
+			"connected":    mqttHealth.Connected,
+			"subscribed":   mqttHealth.Subscribed,
+			"msg_count":    mqttHealth.MsgCount,
+			"last_msg_ms":  mqttHealth.LastMsgMs,
+			"started_at":   mqttHealth.StartedAtMs,
+			"updated_at":   mqttHealth.UpdatedAtMs,
+		}
 	}
 
 	enc := json.NewEncoder(os.Stdout)

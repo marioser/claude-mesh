@@ -3,6 +3,7 @@ package bridge_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -20,12 +21,21 @@ import (
 type fakeSubscriber struct {
 	mu       sync.Mutex
 	handlers []mqtt.MessageHandler
+
+	// failFirst is the number of Subscribe calls that return an error before succeeding.
+	failFirst int
+	callCount int
+	failErr   error
 }
 
 func (f *fakeSubscriber) Subscribe(_ context.Context, handler mqtt.MessageHandler) error {
 	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.callCount++
+	if f.failFirst > 0 && f.callCount <= f.failFirst {
+		return f.failErr
+	}
 	f.handlers = append(f.handlers, handler)
-	f.mu.Unlock()
 	return nil
 }
 
@@ -197,6 +207,74 @@ func TestMalformedPayloadNoPanic(t *testing.T) {
 	if view != nil {
 		t.Error("session written to Redis despite malformed JSON payload")
 	}
+}
+
+// TestBridgeBootRetryOnSubscribeFailure verifies that bridge.Run retries Subscribe
+// with exponential backoff when the initial subscribe returns an error, and eventually
+// processes messages once subscribe succeeds (Bug 2 fix).
+func TestBridgeBootRetryOnSubscribeFailure(t *testing.T) {
+	errors := fmt.Errorf("subscribe temporarily unavailable")
+	fakeSub := &fakeSubscriber{
+		failFirst: 2,     // fail the first 2 Subscribe calls, succeed on 3rd
+		failErr:   errors,
+	}
+	s := newTestStore(t)
+
+	// Use a short sweep interval; also bridge.Run's retry backoff starts at 1s by default.
+	// We cannot override the retry interval via the public API, so we accept that this
+	// test takes ~3s (1s + 2s backoff). To keep tests fast we use t.Parallel() and a
+	// generous deadline.
+	b := bridge.New(fakeSub, s, nil)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	t.Cleanup(cancel)
+
+	done := make(chan struct{})
+	go func() {
+		b.Run(ctx)
+		close(done)
+	}()
+
+	// Wait until subscribe succeeds (fakeSub has a handler registered).
+	deadline := time.After(8 * time.Second)
+	for {
+		fakeSub.mu.Lock()
+		ready := len(fakeSub.handlers) > 0
+		fakeSub.mu.Unlock()
+		if ready {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("bridge never subscribed successfully within 8s")
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
+
+	// Verify the bridge retried: callCount should be 3 (2 failures + 1 success).
+	fakeSub.mu.Lock()
+	count := fakeSub.callCount
+	fakeSub.mu.Unlock()
+	if count < 3 {
+		t.Errorf("Subscribe call count: got %d, want >= 3 (2 failures + 1 success)", count)
+	}
+
+	// Now send a message and verify it is processed.
+	openEv := events.SessionOpen{Ts: nowMs(), SessionID: "retry-sess", Cwd: "/p", Host: "h", PID: 1}
+	payload, _ := json.Marshal(openEv)
+	fakeSub.Send("claude/mesh/session/retry-sess/open", payload)
+	time.Sleep(200 * time.Millisecond)
+
+	view, err := s.GetSession(context.Background(), "retry-sess")
+	if err != nil {
+		t.Fatalf("GetSession after retry: %v", err)
+	}
+	if view == nil {
+		t.Error("session not stored after bridge recovered from subscribe failure")
+	}
+
+	cancel()
+	<-done
 }
 
 // TestSweepTickerFires verifies that the bridge's sweep ticker goroutine evicts

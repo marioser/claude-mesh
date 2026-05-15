@@ -64,6 +64,10 @@ type Store interface {
 	// If sid is empty, returns from the global ring; otherwise from the per-session ring.
 	RecentActivity(ctx context.Context, limit int, sid string) ([]events.Activity, error)
 
+	// TouchActiveSessions resets each active ZSET member score to nowMs.
+	// Used at bridge boot to prevent fresh-restart eviction of live sessions.
+	TouchActiveSessions(ctx context.Context, nowMs float64) (int, error)
+
 	// SweepExpired removes ZSET members with score < cutoffMs. Returns count removed.
 	SweepExpired(ctx context.Context, cutoffMs float64) (int, error)
 

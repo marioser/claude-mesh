@@ -58,7 +58,7 @@ func run() error {
 	// Create MQTT client for mesh_announce. Use a unique client ID per process (includes PID).
 	brokerURL := fmt.Sprintf("tcp://%s:%d", cfg.MQTTHost, cfg.MQTTPort)
 	clientID := fmt.Sprintf("claude-mesh-mcp-%d", os.Getpid())
-	mqttClient := mqtt.NewPahoClient(brokerURL, clientID, cfg.MQTTUsername, cfg.MQTTPassword)
+	mqttClient := mqtt.NewPahoClient(brokerURL, clientID, cfg.MQTTUsername, cfg.MQTTPassword, nil)
 	// Best-effort connect; mesh_announce returns degraded if MQTT is down.
 	if err := mqttClient.Connect(context.Background()); err != nil {
 		log.Warn("mqtt unreachable at startup; mesh_announce will return degraded responses")

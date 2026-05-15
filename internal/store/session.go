@@ -92,6 +92,33 @@ func (r *RedisStore) ListActiveSessions(ctx context.Context) ([]SessionView, err
 	return views, nil
 }
 
+// TouchActiveSessions resets the ZSET score for every existing active-session member
+// to nowMs. Call this at bridge boot to prevent the sweep ticker from evicting sessions
+// that were alive before a restart but haven't emitted a fresh activity event yet.
+// Only existing ZSET members are updated (ZADD XX); no new entries are created.
+func (r *RedisStore) TouchActiveSessions(ctx context.Context, nowMs float64) (int, error) {
+	members, err := r.client.ZRange(ctx, activeSessions, 0, -1).Result()
+	if err != nil {
+		return 0, fmt.Errorf("store.TouchActiveSessions ZRange: %w", err)
+	}
+	if len(members) == 0 {
+		return 0, nil
+	}
+	zs := make([]redis.Z, len(members))
+	for i, sid := range members {
+		zs[i] = redis.Z{Score: nowMs, Member: sid}
+	}
+	// XX: only update existing members, never add new ones.
+	n, err := r.client.ZAddArgs(ctx, activeSessions, redis.ZAddArgs{
+		XX:      true,
+		Members: zs,
+	}).Result()
+	if err != nil {
+		return 0, fmt.Errorf("store.TouchActiveSessions ZAdd: %w", err)
+	}
+	return int(n), nil
+}
+
 // SweepExpired removes ZSET members with score < cutoffMs. Returns count removed.
 func (r *RedisStore) SweepExpired(ctx context.Context, cutoffMs float64) (int, error) {
 	n, err := r.client.ZRemRangeByScore(ctx, activeSessions, "-inf", fmt.Sprintf("%f", cutoffMs)).Result()

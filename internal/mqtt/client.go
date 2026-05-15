@@ -23,6 +23,10 @@ type Client interface {
 	Disconnect(timeoutMs uint)
 }
 
+// OnConnectFunc is called by paho every time the client successfully connects or
+// reconnects. The implementation MUST NOT block — spawn a goroutine if needed.
+type OnConnectFunc func()
+
 // pahoClient wraps a paho.Client with a mutex around Publish to prevent
 // concurrent write races on the underlying TCP connection.
 // Pattern mirrors kpiServiceGo (proven in production).
@@ -33,7 +37,10 @@ type pahoClient struct {
 
 // NewPahoClient creates a connected-ready paho Client.
 // Call Connect before using Publish or Subscribe.
-func NewPahoClient(broker string, clientID string, username, password string) Client {
+// If onConnect is non-nil it is wired as paho's OnConnectHandler so the caller
+// can re-subscribe on every automatic reconnect. The callback runs on paho's
+// internal network goroutine — it MUST NOT block.
+func NewPahoClient(broker string, clientID string, username, password string, onConnect OnConnectFunc) Client {
 	opts := pahomqtt.NewClientOptions().
 		AddBroker(broker).
 		SetClientID(clientID).
@@ -45,6 +52,12 @@ func NewPahoClient(broker string, clientID string, username, password string) Cl
 	if username != "" {
 		opts.SetUsername(username)
 		opts.SetPassword(password)
+	}
+
+	if onConnect != nil {
+		opts.SetOnConnectHandler(func(_ pahomqtt.Client) {
+			onConnect()
+		})
 	}
 
 	return &pahoClient{paho: pahomqtt.NewClient(opts)}

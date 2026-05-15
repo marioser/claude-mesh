@@ -46,7 +46,8 @@ func (f *fakeStore) RecentActivity(_ context.Context, limit int, sid string) ([]
 	}
 	return f.activities, nil
 }
-func (f *fakeStore) SweepExpired(_ context.Context, _ float64) (int, error) { return 0, nil }
+func (f *fakeStore) SweepExpired(_ context.Context, _ float64) (int, error)         { return 0, nil }
+func (f *fakeStore) TouchActiveSessions(_ context.Context, _ float64) (int, error) { return 0, nil }
 func (f *fakeStore) HealthCheck(_ context.Context) error                     { return f.healthErr }
 
 // usageStore embeds fakeStore and adds usage keys for ReadUsage tests.

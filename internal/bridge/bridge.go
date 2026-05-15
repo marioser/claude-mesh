@@ -17,14 +17,31 @@ import (
 )
 
 const (
-	chanCap             = 256
-	workerCount         = 2
+	chanCap              = 256
+	workerCount          = 2
 	defaultSweepInterval = 10 * time.Second
+
+	// Boot-retry backoff: 1s → 2s → 4s → 8s → 16s → 32s (capped).
+	retryInitial = 1 * time.Second
+	retryCap     = 32 * time.Second
 )
 
 // Subscriber is the minimal interface the bridge depends on for receiving MQTT messages.
 type Subscriber interface {
 	Subscribe(ctx context.Context, handler mqtt.MessageHandler) error
+}
+
+// StatsProvider is an optional interface implemented by *mqtt.Subscriber.
+// When the Bridge's Subscriber also implements this, health state is written to Redis
+// on every sweep tick.
+type StatsProvider interface {
+	Stats() mqtt.SubscriberStats
+}
+
+// HealthWriter is the Redis-backed writer for MQTT health state.
+// Implemented by *store.RedisStore (not on Store interface — bridge-specific).
+type HealthWriter interface {
+	WriteMQTTHealth(ctx context.Context, h store.MQTTHealthFields) error
 }
 
 // envelope wraps an inbound MQTT message for async processing.
@@ -37,6 +54,8 @@ type envelope struct {
 type Bridge struct {
 	sub           Subscriber
 	store         store.Store
+	healthWriter  HealthWriter  // optional; nil when store doesn't implement it
+	statsProvider StatsProvider // optional; nil when sub doesn't implement it
 	log           *zap.Logger
 	sweepInterval time.Duration
 }
@@ -53,24 +72,52 @@ func NewWithSweepInterval(sub Subscriber, s store.Store, log *zap.Logger, sweepI
 	if log == nil {
 		log = zap.NewNop()
 	}
-	return &Bridge{sub: sub, store: s, log: log, sweepInterval: sweepInterval}
+	b := &Bridge{sub: sub, store: s, log: log, sweepInterval: sweepInterval}
+	// Wire optional interfaces by type assertion — keeps the bridge decoupled from concrete types.
+	if hw, ok := s.(HealthWriter); ok {
+		b.healthWriter = hw
+	}
+	if sp, ok := sub.(StatsProvider); ok {
+		b.statsProvider = sp
+	}
+	return b
 }
 
-// Run blocks until ctx is cancelled. It subscribes to the MQTT wildcard topic,
-// starts worker goroutines to process events, and runs the cleanup ticker.
+// Run blocks until ctx is cancelled. It subscribes to the MQTT wildcard topic with
+// exponential-backoff retries (Bug 2 fix), starts worker goroutines to process events,
+// and runs the cleanup + health-publish ticker.
 func (b *Bridge) Run(ctx context.Context) {
 	ch := make(chan envelope, chanCap)
 
-	// Subscribe before starting workers.
-	if err := b.sub.Subscribe(ctx, func(topic string, payload []byte) {
-		select {
-		case ch <- envelope{topic: topic, payload: payload}:
-		default:
-			b.log.Warn("bridge channel full, dropping message", zap.String("topic", topic))
+	// Boot-time subscribe with exponential backoff. The OnConnectHandler (wired by
+	// runBridge in main.go) handles mid-run reconnects — this loop only covers the
+	// initial connect/subscribe attempt.
+	backoff := retryInitial
+	for {
+		err := b.sub.Subscribe(ctx, func(topic string, payload []byte) {
+			select {
+			case ch <- envelope{topic: topic, payload: payload}:
+			default:
+				b.log.Warn("bridge channel full, dropping message", zap.String("topic", topic))
+			}
+		})
+		if err == nil {
+			b.log.Info("bridge subscribed to MQTT")
+			break
 		}
-	}); err != nil {
-		b.log.Error("bridge subscribe failed", zap.Error(err))
-		return
+		b.log.Warn("bridge subscribe failed, retrying",
+			zap.Error(err),
+			zap.Duration("backoff", backoff))
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(backoff):
+		}
+		backoff *= 2
+		if backoff > retryCap {
+			backoff = retryCap
+		}
 	}
 
 	// Start N worker goroutines.
@@ -90,7 +137,7 @@ func (b *Bridge) Run(ctx context.Context) {
 		}()
 	}
 
-	// Cleanup ticker.
+	// Cleanup + health-publish ticker.
 	ticker := time.NewTicker(b.sweepInterval)
 	defer ticker.Stop()
 
@@ -107,7 +154,28 @@ func (b *Bridge) Run(ctx context.Context) {
 			} else if n > 0 {
 				b.log.Debug("swept stale sessions", zap.Int("count", n))
 			}
+			b.writeMQTTHealth(ctx)
 		}
+	}
+}
+
+// writeMQTTHealth publishes the subscriber health state to Redis if both
+// the health writer and stats provider are available.
+func (b *Bridge) writeMQTTHealth(ctx context.Context) {
+	if b.healthWriter == nil || b.statsProvider == nil {
+		return
+	}
+	stats := b.statsProvider.Stats()
+	h := store.MQTTHealthFields{
+		Connected:   stats.Connected,
+		Subscribed:  stats.Subscribed,
+		MsgCount:    stats.MsgCount,
+		LastMsgMs:   stats.LastMsgMs,
+		StartedAtMs: stats.StartedAtMs,
+		UpdatedAtMs: time.Now().UnixMilli(),
+	}
+	if err := b.healthWriter.WriteMQTTHealth(ctx, h); err != nil {
+		b.log.Warn("bridge: write mqtt health failed", zap.Error(err))
 	}
 }
 
