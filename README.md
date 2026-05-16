@@ -32,19 +32,52 @@ machines.
 
 ## Architecture
 
+Solid arrows are event flow (hooks publish, bridge subscribes, bridge writes
+state). Dashed arrows are MCP queries that Claude can issue mid-conversation
+to read the shared state.
+
+```mermaid
+flowchart LR
+    subgraph CC["Parallel Claude Code sessions"]
+        direction TB
+        S1["Session 1<br/>frontend worktree"]
+        S2["Session 2<br/>backend worktree"]
+        S3["Session 3<br/>agent swarm"]
+        S4["Session 4<br/>docs / shared"]
+    end
+
+    subgraph Mesh["Claude Mesh infrastructure"]
+        direction LR
+        MQTT[("Mosquitto<br/>MQTT broker")]
+        Bridge["bridge<br/>daemon"]
+        Redis[("Redis<br/>state store")]
+
+        MQTT -- subscribe --> Bridge
+        Bridge -- writes --> Redis
+    end
+
+    S1 -- hooks publish --> MQTT
+    S2 -- hooks publish --> MQTT
+    S3 -- hooks publish --> MQTT
+    S4 -- hooks publish --> MQTT
+
+    Redis -. mesh_status / active_sessions / recent_activity / check_conflict .-> CC
+
+    classDef session fill:#1f2937,stroke:#60a5fa,color:#e5e7eb
+    classDef broker fill:#0f172a,stroke:#a78bfa,color:#e5e7eb
+    classDef store fill:#0f172a,stroke:#f59e0b,color:#e5e7eb
+    classDef daemon fill:#0f172a,stroke:#10b981,color:#e5e7eb
+
+    class S1,S2,S3,S4 session
+    class MQTT broker
+    class Redis store
+    class Bridge daemon
 ```
-┌─────────────────┐    publish    ┌──────────┐    subscribe    ┌─────────────┐
-│ Claude Code     │─────────────▶│ Mosquitto│────────────────▶│ bridge      │
-│ session (hooks) │               │ (MQTT)   │                  │ (daemon)    │
-└─────────────────┘               └──────────┘                  └──────┬──────┘
-                                                                       │ writes
-                                                                       ▼
-                                                                ┌─────────────┐
-┌─────────────────┐  MCP tools                                  │   Redis     │
-│ Claude Code     │◀────────────────────────────────────────────│  (state)    │
-│ (mcp client)    │                                              └─────────────┘
-└─────────────────┘
-```
+
+The point of the mesh becomes clear with multiple sessions running in
+parallel: every session publishes its lifecycle and tool-use events, the
+bridge consolidates them in Redis, and any session can query the shared
+state through MCP tools without knowing about the others up front.
 
 Three components ship as Go binaries:
 
