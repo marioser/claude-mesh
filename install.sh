@@ -80,9 +80,9 @@ main() {
     info "Version: ${version}"
     info "Prefix:  ${PREFIX}"
 
-    local tmp
+    # Use a script-global tmp so the EXIT trap can still see it.
     tmp=$(mktemp -d)
-    trap 'rm -rf "${tmp}"' EXIT
+    trap 'rm -rf "${tmp:-}"' EXIT
 
     info "Downloading ${archive}"
     curl -fsSL -o "${tmp}/${archive}" "${url}"

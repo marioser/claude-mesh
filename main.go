@@ -577,7 +577,7 @@ func gitBranchAndChanges() (branch string, changes int) {
 }
 
 func usage() {
-	fmt.Fprint(os.Stderr, `claude-mesh-bridge - MIOBOX Claude Mesh observability daemon
+	fmt.Fprint(os.Stderr, `claude-mesh-bridge - Claude Mesh observability daemon
 
 Usage:
   claude-mesh-bridge run                         Start the bridge daemon
