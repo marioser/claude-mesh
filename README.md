@@ -1,91 +1,215 @@
-# Claude Mesh — MIOBOX Observability Bridge (SMBX-177)
+# Claude Mesh
 
-Claude Mesh enables real-time cross-session awareness for Claude Code. It publishes session lifecycle and tool-use events over MQTT, persists them in Redis, and exposes 4 MCP tools so any running Claude session can query the shared mesh state.
+> Observability mesh for parallel [Claude Code](https://claude.com/claude-code) sessions.
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Go Reference](https://pkg.go.dev/badge/github.com/marioser/claude-mesh.svg)](https://pkg.go.dev/github.com/marioser/claude-mesh)
+
+Run multiple Claude Code sessions in parallel? Claude Mesh gives every session
+a live view of what the others are doing: who is active, in what repo, on what
+branch, touching which files, and how recently. It also detects file
+conflicts across sessions before they become merge conflicts.
+
+Built for developers using worktrees, agent swarms, monorepos, or shared dev
+machines.
 
 ---
 
-## Install
+## What it does
+
+- **Cross-session visibility** — every Claude Code session publishes lifecycle
+  and tool-use events; every session can query the shared state.
+- **File conflict detection** — warn before two sessions touch the same file.
+- **MCP integration** — exposes tools (`mesh_status`, `mesh_active_sessions`,
+  `mesh_recent_activity`, `mesh_check_conflict`, `mesh_announce`) so Claude can
+  query the mesh directly during a conversation.
+- **Status line integration** — one-line summary of mesh activity for Claude
+  Code's `statusLine`.
+- **MQTT-based** — local Mosquitto broker, no cloud dependency, your data
+  stays on your machine.
+
+---
+
+## Architecture
+
+```
+┌─────────────────┐    publish    ┌──────────┐    subscribe    ┌─────────────┐
+│ Claude Code     │─────────────▶│ Mosquitto│────────────────▶│ bridge      │
+│ session (hooks) │               │ (MQTT)   │                  │ (daemon)    │
+└─────────────────┘               └──────────┘                  └──────┬──────┘
+                                                                       │ writes
+                                                                       ▼
+                                                                ┌─────────────┐
+┌─────────────────┐  MCP tools                                  │   Redis     │
+│ Claude Code     │◀────────────────────────────────────────────│  (state)    │
+│ (mcp client)    │                                              └─────────────┘
+└─────────────────┘
+```
+
+Three components ship as Go binaries:
+
+| Binary | Role |
+|---|---|
+| `claude-mesh-bridge` | Long-running daemon. Subscribes to MQTT, persists state to Redis. |
+| `claude-mesh-mcp` | MCP server that exposes mesh tools to Claude Code. |
+| `claude-mesh-bridge install/uninstall` | Wires up hooks, launchd unit, and MCP config. |
+
+---
+
+## Quick start
 
 ### Prerequisites
 
-- mosquitto (MQTT broker): `brew install mosquitto`
-- redis: `brew install redis`
-- Both running on localhost (default ports 1883 / 6379)
+- Go 1.24+ (only required if installing from source)
+- Mosquitto MQTT broker on `localhost:1883`
+- Redis on `localhost:6379`
+- macOS (Linux support is limited in v0.1 — see [Linux notes](#linux-support))
 
-### Build and install
+The fastest way to get the broker + Redis is the bundled `docker-compose.yml`
+(coming in v0.1 — see issues).
+
+### Install
+
+#### Option A — install script (recommended once releases ship)
 
 ```bash
-cd scripts/claude-mesh
-make build
-./dist/claude-mesh-bridge install
+curl -fsSL https://raw.githubusercontent.com/marioser/claude-mesh/main/install.sh | bash
 ```
 
-The installer:
-1. Writes the launchd plist and loads the daemon (`launchctl load`)
-2. Patches `~/.claude/settings.json` with 3 hook entries (idempotent)
-3. Patches `~/.claude/.mcp.json` with the `claude-mesh` MCP server entry (idempotent)
+#### Option B — `go install`
+
+```bash
+go install github.com/marioser/claude-mesh@latest
+go install github.com/marioser/claude-mesh/cmd/claude-mesh-mcp@latest
+```
+
+Then wire up hooks, launchd, and MCP entry:
+
+```bash
+claude-mesh-bridge install
+```
+
+This is idempotent — running it again won't duplicate anything.
+
+### Verify
+
+Open a Claude Code session and ask:
+
+> Are there other Claude Code sessions active right now?
+
+Claude will call `mesh_status` and report active sessions, cwd, and branches.
+
+You can also check directly:
+
+```bash
+claude-mesh-bridge status --json
+```
+
+Healthy output includes `mqtt: { connected: true, subscribed: true }`.
+
+---
+
+## Configuration
+
+All config is via environment variables. None are required for the default
+local-host setup.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `CLAUDE_MESH_MQTT_HOST` | `localhost` | MQTT broker host |
+| `CLAUDE_MESH_MQTT_PORT` | `1883` | MQTT broker port |
+| `CLAUDE_MESH_MQTT_USERNAME` | _(empty)_ | MQTT auth user |
+| `CLAUDE_MESH_MQTT_PASSWORD` | _(empty)_ | MQTT auth password |
+| `CLAUDE_MESH_REDIS_ADDR` | `localhost:6379` | Redis address |
+| `CLAUDE_MESH_REDIS_PASSWORD` | _(empty)_ | Redis auth password |
+| `CLAUDE_MESH_REDIS_DB` | `0` | Redis DB index |
+| `CLAUDE_MESH_LOG_LEVEL` | `info` | `debug \| info \| warn \| error` |
+| `CLAUDE_MESH_LOG_DIR` | `~/Library/Logs` (macOS) | Where the daemon writes logs |
+| `CLAUDE_MESH_ANTHROPIC_ORG_ID` | _(empty, optional)_ | Anthropic usage poll org ID |
+| `CLAUDE_MESH_ANTHROPIC_COOKIE` | _(empty, optional)_ | Anthropic usage poll cookie |
+
+### Optional: Anthropic usage tracking
+
+If you want the daemon to track your Anthropic plan usage in addition to mesh
+activity, set `CLAUDE_MESH_ANTHROPIC_ORG_ID` and `CLAUDE_MESH_ANTHROPIC_COOKIE`
+(extract from your browser session). When both are empty (default), the
+daemon parses JSONL transcripts locally instead — no external calls.
+
+---
+
+## MCP tools exposed to Claude Code
+
+| Tool | What it returns |
+|---|---|
+| `mesh_status` | Count + summaries of all currently active sessions |
+| `mesh_active_sessions` | Full list of active sessions |
+| `mesh_recent_activity` | Cross-session activity ring buffer (last N minutes) |
+| `mesh_check_conflict` | Tells if another session has been touching a given file |
+| `mesh_announce` | Lets a session broadcast a short message to the mesh |
 
 ---
 
 ## Uninstall
 
 ```bash
-./dist/claude-mesh-bridge uninstall
+claude-mesh-bridge uninstall
 ```
+
+Removes hooks, launchd unit, and MCP config entry. Does NOT touch Mosquitto
+or Redis (you installed them, you keep them).
 
 ---
 
-## Dev Loop
+## Status line integration
+
+Add to your `~/.claude/settings.json`:
+
+```json
+{
+  "statusLine": {
+    "command": "claude-mesh-bridge statusline"
+  }
+}
+```
+
+You'll see a compact line with active session count and recent activity
+counters at the bottom of Claude Code.
+
+---
+
+## Linux support
+
+v0.1 supports Linux for the binaries themselves (Go is cross-platform), but
+the `install` command currently only wires launchd (macOS). On Linux you can:
+
+1. Run `claude-mesh-bridge run` manually or under your favorite supervisor.
+2. Set `CLAUDE_MESH_LOG_DIR=~/.local/state/claude-mesh` to follow XDG conventions.
+
+A systemd unit template is planned for v0.2.
+
+---
+
+## Development
 
 ```bash
-make test          # unit tests (miniredis-backed, no external deps)
-make test-race     # unit tests with race detector
-make test-integration  # requires mosquitto + redis running
-make test-e2e      # shell E2E script (requires build)
-make build         # compile for host
-make crossbuild    # compile for darwin-arm64, darwin-amd64, linux-amd64
+git clone https://github.com/marioser/claude-mesh.git
+cd claude-mesh
+go test ./...
+go build ./...
 ```
 
----
-
-## Topics
-
-| Topic | Publisher | QoS | Description |
-|-------|-----------|-----|-------------|
-| `claude/mesh/session/{sid}/open` | session-start hook | 1 | Session opened |
-| `claude/mesh/session/{sid}/activity` | pre-tool-use hook | 1 | Tool use event |
-| `claude/mesh/session/{sid}/close` | stop hook | 1 | Session closed |
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the contribution workflow.
 
 ---
 
-## Redis Keys
+## Versioning
 
-| Key | Type | TTL | Description |
-|-----|------|-----|-------------|
-| `claude:mesh:session:{sid}` | Hash | 90s | Session metadata |
-| `claude:mesh:sessions:active` | ZSET | none | Active session IDs (score = last_seen_ms) |
-| `claude:mesh:activity:{sid}` | List | 600s | Per-session activity ring (newest first, max 50) |
-| `claude:mesh:activity:global` | List | 1800s | Global activity ring (newest first, max 200) |
+This project stays on `v0.x.y` until it leaves beta. Breaking changes between
+`v0.x` minor versions are allowed under semver pre-1.0 rules — see the
+CHANGELOG for migration notes.
 
 ---
 
-## MCP Tools
+## License
 
-| Tool | Description |
-|------|-------------|
-| `mesh_status` | Active session count and summaries |
-| `mesh_check_conflict` | Sessions that recently touched a given file path |
-| `mesh_recent_activity` | Cross-session activity from global ring buffer |
-| `mesh_announce` | Publish a manual intent event |
-
----
-
-## Troubleshooting
-
-**Daemon not starting**: Check `~/Library/Logs/claude-mesh-bridge.log`. Verify mosquitto and redis are running.
-
-**Hooks not firing**: Verify entries in `~/.claude/settings.json`. Run `claude-mesh-bridge status` to check daemon/Redis/MQTT health.
-
-**Log paths**:
-- Daemon: `~/Library/Logs/claude-mesh-bridge.log`
-- Hooks: `~/Library/Logs/claude-mesh-hooks.log`
+[MIT](LICENSE) © 2026 Mario Serrano
