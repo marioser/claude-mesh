@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"claude-mesh/internal/statusline"
+	"github.com/marioser/claude-mesh/internal/statusline"
 )
 
 // TestContextLimitForModel verifies the context window detection heuristic.

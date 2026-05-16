@@ -12,7 +12,7 @@ const plistTemplate = `<?xml version="1.0" encoding="UTF-8"?>
 <plist version="1.0">
 <dict>
 	<key>Label</key>
-	<string>com.miobox.claude-mesh-bridge</string>
+	<string>io.github.marioser.claude-mesh-bridge</string>
 	<key>ProgramArguments</key>
 	<array>
 		<string>{{.BridgeBin}}</string>

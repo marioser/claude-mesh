@@ -4,7 +4,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"claude-mesh/internal/contextusage"
+	"github.com/marioser/claude-mesh/internal/contextusage"
 )
 
 func fixturesDir() string {

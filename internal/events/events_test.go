@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"claude-mesh/internal/events"
+	"github.com/marioser/claude-mesh/internal/events"
 )
 
 // TestSessionOpenRoundTrip verifies that SessionOpen marshals to and from JSON

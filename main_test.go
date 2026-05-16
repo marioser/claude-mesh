@@ -16,7 +16,7 @@ import (
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 
-	"claude-mesh/internal/usagestats"
+	"github.com/marioser/claude-mesh/internal/usagestats"
 )
 
 // TestPollUsageOnceWritesRedisKeys verifies that pollUsageOnce scans JSONL files

@@ -7,8 +7,8 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 
-	"claude-mesh/internal/events"
-	"claude-mesh/internal/mcp/handlers"
+	"github.com/marioser/claude-mesh/internal/events"
+	"github.com/marioser/claude-mesh/internal/mcp/handlers"
 )
 
 type recentFakeStore struct {

@@ -18,18 +18,18 @@ import (
 
 	"go.uber.org/zap"
 
-	"claude-mesh/internal/anthropicapi"
-	"claude-mesh/internal/bridge"
-	"claude-mesh/internal/config"
-	"claude-mesh/internal/contextusage"
-	"claude-mesh/internal/installer"
-	"claude-mesh/internal/lock"
-	"claude-mesh/internal/logging"
-	mqttclient "claude-mesh/internal/mqtt"
-	"claude-mesh/internal/publisher"
-	"claude-mesh/internal/statusline"
-	"claude-mesh/internal/store"
-	"claude-mesh/internal/usagestats"
+	"github.com/marioser/claude-mesh/internal/anthropicapi"
+	"github.com/marioser/claude-mesh/internal/bridge"
+	"github.com/marioser/claude-mesh/internal/config"
+	"github.com/marioser/claude-mesh/internal/contextusage"
+	"github.com/marioser/claude-mesh/internal/installer"
+	"github.com/marioser/claude-mesh/internal/lock"
+	"github.com/marioser/claude-mesh/internal/logging"
+	mqttclient "github.com/marioser/claude-mesh/internal/mqtt"
+	"github.com/marioser/claude-mesh/internal/publisher"
+	"github.com/marioser/claude-mesh/internal/statusline"
+	"github.com/marioser/claude-mesh/internal/store"
+	"github.com/marioser/claude-mesh/internal/usagestats"
 
 	"github.com/redis/go-redis/v9"
 )
@@ -466,7 +466,7 @@ func runEnsureRunning() error {
 	// Kickstart via launchctl (budget 200ms).
 	uid := strconv.Itoa(os.Getuid())
 	cmd := exec.Command("launchctl", "kickstart", "-k",
-		"gui/"+uid+"/com.miobox.claude-mesh-bridge")
+		"gui/"+uid+"/io.github.marioser.claude-mesh-bridge")
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {

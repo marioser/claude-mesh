@@ -18,8 +18,8 @@ import (
 	"strings"
 	"time"
 
-	"claude-mesh/internal/contextusage"
-	"claude-mesh/internal/store"
+	"github.com/marioser/claude-mesh/internal/contextusage"
+	"github.com/marioser/claude-mesh/internal/store"
 )
 
 const (

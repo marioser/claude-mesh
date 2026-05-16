@@ -9,8 +9,8 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 
-	"claude-mesh/internal/mcp/handlers"
-	"claude-mesh/internal/mqtt"
+	"github.com/marioser/claude-mesh/internal/mcp/handlers"
+	"github.com/marioser/claude-mesh/internal/mqtt"
 )
 
 // fakeMQTTClient is a test double for mqtt.Client used in announce tests.

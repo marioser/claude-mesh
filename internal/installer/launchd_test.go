@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"claude-mesh/internal/installer"
+	"github.com/marioser/claude-mesh/internal/installer"
 )
 
 // TestLaunchdPlistRendered verifies that the plist is rendered with the correct binary path.
@@ -14,7 +14,7 @@ import (
 // launchctl calls are skipped in unit tests — this is filesystem-only behavior.
 func TestLaunchdPlistRendered(t *testing.T) {
 	dir := t.TempDir()
-	plistDst := filepath.Join(dir, "com.miobox.claude-mesh-bridge.plist")
+	plistDst := filepath.Join(dir, "io.github.marioser.claude-mesh-bridge.plist")
 	bridgeBin := "/usr/local/bin/claude-mesh-bridge"
 
 	// We can't call launchctl in tests, so test the rendering directly.
@@ -32,8 +32,8 @@ func TestLaunchdPlistRendered(t *testing.T) {
 	if !strings.Contains(plistStr, bridgeBin) {
 		t.Errorf("plist does not contain binary path %q", bridgeBin)
 	}
-	if !strings.Contains(plistStr, "com.miobox.claude-mesh-bridge") {
-		t.Error("plist does not contain label com.miobox.claude-mesh-bridge")
+	if !strings.Contains(plistStr, "io.github.marioser.claude-mesh-bridge") {
+		t.Error("plist does not contain label io.github.marioser.claude-mesh-bridge")
 	}
 	if !strings.Contains(plistStr, "<true/>") {
 		t.Error("plist does not contain KeepAlive/RunAtLoad <true/>")
@@ -46,7 +46,7 @@ func TestLaunchdPlistRendered(t *testing.T) {
 // TestLaunchdPlistIdempotent verifies that writing the plist twice produces identical output.
 func TestLaunchdPlistIdempotent(t *testing.T) {
 	dir := t.TempDir()
-	plistDst := filepath.Join(dir, "com.miobox.claude-mesh-bridge.plist")
+	plistDst := filepath.Join(dir, "io.github.marioser.claude-mesh-bridge.plist")
 	bridgeBin := "/usr/local/bin/claude-mesh-bridge"
 
 	if err := installer.RenderPlist(plistDst, bridgeBin); err != nil {
@@ -67,7 +67,7 @@ func TestLaunchdPlistIdempotent(t *testing.T) {
 // TestLaunchdUninstallRemovesPlist verifies that UninstallLaunchd removes the plist file.
 func TestLaunchdUninstallRemovesPlist(t *testing.T) {
 	dir := t.TempDir()
-	plistDst := filepath.Join(dir, "com.miobox.claude-mesh-bridge.plist")
+	plistDst := filepath.Join(dir, "io.github.marioser.claude-mesh-bridge.plist")
 
 	// Create the plist file.
 	if err := installer.RenderPlist(plistDst, "/bin/bridge"); err != nil {

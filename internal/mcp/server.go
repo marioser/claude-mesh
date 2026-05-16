@@ -5,10 +5,10 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 
-	"claude-mesh/internal/config"
-	"claude-mesh/internal/mcp/handlers"
-	"claude-mesh/internal/mqtt"
-	"claude-mesh/internal/store"
+	"github.com/marioser/claude-mesh/internal/config"
+	"github.com/marioser/claude-mesh/internal/mcp/handlers"
+	"github.com/marioser/claude-mesh/internal/mqtt"
+	"github.com/marioser/claude-mesh/internal/store"
 )
 
 // NewServer creates an MCP server with all Claude Mesh tools registered.

@@ -1,4 +1,4 @@
-module claude-mesh
+module github.com/marioser/claude-mesh
 
 go 1.26.3
 

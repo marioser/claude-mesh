@@ -4,7 +4,7 @@ import (
 	"os"
 	"testing"
 
-	"claude-mesh/internal/usagestats"
+	"github.com/marioser/claude-mesh/internal/usagestats"
 )
 
 // TestResolveFromEnvDefaultMax20 verifies that with no env vars, the default plan is Max20.

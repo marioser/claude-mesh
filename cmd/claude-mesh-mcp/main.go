@@ -8,11 +8,11 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/redis/go-redis/v9"
 
-	"claude-mesh/internal/config"
-	"claude-mesh/internal/logging"
-	mcpserver "claude-mesh/internal/mcp"
-	"claude-mesh/internal/mqtt"
-	"claude-mesh/internal/store"
+	"github.com/marioser/claude-mesh/internal/config"
+	"github.com/marioser/claude-mesh/internal/logging"
+	mcpserver "github.com/marioser/claude-mesh/internal/mcp"
+	"github.com/marioser/claude-mesh/internal/mqtt"
+	"github.com/marioser/claude-mesh/internal/store"
 )
 
 func main() {

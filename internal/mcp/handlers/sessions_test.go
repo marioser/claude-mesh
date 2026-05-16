@@ -7,8 +7,8 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 
-	"claude-mesh/internal/mcp/handlers"
-	"claude-mesh/internal/store"
+	"github.com/marioser/claude-mesh/internal/mcp/handlers"
+	"github.com/marioser/claude-mesh/internal/store"
 )
 
 // TestSessionsListActive verifies that mesh_active_sessions returns all active sessions.

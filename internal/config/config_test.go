@@ -3,7 +3,7 @@ package config_test
 import (
 	"testing"
 
-	"claude-mesh/internal/config"
+	"github.com/marioser/claude-mesh/internal/config"
 )
 
 // TestDefaultValues verifies that Load() returns design-specified defaults when no env vars are set.

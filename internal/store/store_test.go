@@ -9,8 +9,8 @@ import (
 	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"
 
-	"claude-mesh/internal/events"
-	"claude-mesh/internal/store"
+	"github.com/marioser/claude-mesh/internal/events"
+	"github.com/marioser/claude-mesh/internal/store"
 )
 
 // newTestStore spins up a miniredis server and returns a RedisStore backed by it.

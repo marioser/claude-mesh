@@ -9,9 +9,9 @@ import (
 	"fmt"
 	"io"
 
-	"claude-mesh/internal/config"
-	"claude-mesh/internal/events"
-	"claude-mesh/internal/mqtt"
+	"github.com/marioser/claude-mesh/internal/config"
+	"github.com/marioser/claude-mesh/internal/events"
+	"github.com/marioser/claude-mesh/internal/mqtt"
 )
 
 // PublishCmd reads a JSON payload from r, constructs the correct typed event for

@@ -6,8 +6,8 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 
-	"claude-mesh/internal/events"
-	"claude-mesh/internal/store"
+	"github.com/marioser/claude-mesh/internal/events"
+	"github.com/marioser/claude-mesh/internal/store"
 )
 
 type recentEntry struct {

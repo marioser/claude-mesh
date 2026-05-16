@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"claude-mesh/internal/lock"
+	"github.com/marioser/claude-mesh/internal/lock"
 )
 
 // tempLockPath returns a lock path in a temp dir that is cleaned up after the test.

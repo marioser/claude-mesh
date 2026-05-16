@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
 	<key>Label</key>
-	<string>com.miobox.claude-mesh-bridge</string>
+	<string>io.github.marioser.claude-mesh-bridge</string>
 	<key>ProgramArguments</key>
 	<array>
 		<string>/path/to/claude-mesh-bridge</string>

@@ -3,7 +3,7 @@ package store
 import (
 	"context"
 
-	"claude-mesh/internal/events"
+	"github.com/marioser/claude-mesh/internal/events"
 )
 
 // SessionView is the read model returned by GetSession and ListActiveSessions.

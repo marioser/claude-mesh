@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"claude-mesh/internal/installer"
+	"github.com/marioser/claude-mesh/internal/installer"
 )
 
 // TestMCPFirstInstall verifies that PatchMCP adds the claude-mesh server entry.

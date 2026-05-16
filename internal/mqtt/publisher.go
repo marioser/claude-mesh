@@ -4,7 +4,7 @@ package mqtt
 import (
 	"context"
 
-	"claude-mesh/internal/events"
+	"github.com/marioser/claude-mesh/internal/events"
 )
 
 // Publisher sends typed events to the MQTT broker using the correct topic scheme.

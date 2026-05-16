@@ -8,7 +8,7 @@ import (
 
 	"github.com/redis/go-redis/v9"
 
-	"claude-mesh/internal/events"
+	"github.com/marioser/claude-mesh/internal/events"
 )
 
 // PushActivity appends an activity event to per-session and global ring buffers,

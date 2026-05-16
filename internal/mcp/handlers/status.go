@@ -10,7 +10,7 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 
-	"claude-mesh/internal/store"
+	"github.com/marioser/claude-mesh/internal/store"
 )
 
 // ToolFn is the function signature expected by mcp-go tool registrations.

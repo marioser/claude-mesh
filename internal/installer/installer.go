@@ -1,7 +1,7 @@
 // Package installer handles idempotent installation of Claude Mesh:
 // - Claude Code hooks in ~/.claude/settings.json
 // - MCP server entry in <repo-root>/.mcp.json
-// - launchd plist at ~/Library/LaunchAgents/com.miobox.claude-mesh-bridge.plist
+// - launchd plist at ~/Library/LaunchAgents/io.github.marioser.claude-mesh-bridge.plist
 // - Stable binary copies in ~/.local/bin/
 // - Stable hook copies in ~/.claude/hooks/claude-mesh/
 package installer
@@ -34,7 +34,7 @@ type Paths struct {
 	// Config file targets.
 	SettingsJSON string // ~/.claude/settings.json
 	MCPJson      string // <repo-root>/.mcp.json (or ~/.claude/.mcp.json as fallback)
-	PlistDst     string // ~/Library/LaunchAgents/com.miobox.claude-mesh-bridge.plist
+	PlistDst     string // ~/Library/LaunchAgents/io.github.marioser.claude-mesh-bridge.plist
 }
 
 // DefaultPaths resolves standard install locations relative to the running binary.
@@ -71,7 +71,7 @@ func DefaultPaths() Paths {
 
 		SettingsJSON: filepath.Join(home, ".claude", "settings.json"),
 		MCPJson:      mcpJsonPath,
-		PlistDst:     filepath.Join(home, "Library", "LaunchAgents", "com.miobox.claude-mesh-bridge.plist"),
+		PlistDst:     filepath.Join(home, "Library", "LaunchAgents", "io.github.marioser.claude-mesh-bridge.plist"),
 	}
 }
 

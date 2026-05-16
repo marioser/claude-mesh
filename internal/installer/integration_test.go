@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"claude-mesh/internal/installer"
+	"github.com/marioser/claude-mesh/internal/installer"
 )
 
 // setupFakeHome creates a temp directory tree mimicking $HOME structure.
@@ -75,7 +75,7 @@ func buildTestPaths(homeDir, srcBinDir, srcHooksDir string) installer.Paths {
 	return installer.Paths{
 		SettingsJSON:   filepath.Join(homeDir, ".claude", "settings.json"),
 		MCPJson:        filepath.Join(homeDir, ".mcp.json"),
-		PlistDst:       filepath.Join(homeDir, "Library", "LaunchAgents", "com.miobox.claude-mesh-bridge.plist"),
+		PlistDst:       filepath.Join(homeDir, "Library", "LaunchAgents", "io.github.marioser.claude-mesh-bridge.plist"),
 		SrcBridgeBin:   filepath.Join(srcBinDir, "claude-mesh-bridge"),
 		SrcMCPBin:      filepath.Join(srcBinDir, "claude-mesh-mcp"),
 		SrcHooksDir:    srcHooksDir,

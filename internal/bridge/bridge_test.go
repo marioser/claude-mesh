@@ -11,10 +11,10 @@ import (
 	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"
 
-	"claude-mesh/internal/bridge"
-	"claude-mesh/internal/events"
-	"claude-mesh/internal/mqtt"
-	"claude-mesh/internal/store"
+	"github.com/marioser/claude-mesh/internal/bridge"
+	"github.com/marioser/claude-mesh/internal/events"
+	"github.com/marioser/claude-mesh/internal/mqtt"
+	"github.com/marioser/claude-mesh/internal/store"
 )
 
 // fakeSubscriber records subscriptions and allows triggering messages.

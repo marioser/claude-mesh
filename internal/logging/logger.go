@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"claude-mesh/internal/config"
+	"github.com/marioser/claude-mesh/internal/config"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )

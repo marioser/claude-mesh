@@ -5,7 +5,7 @@ import (
 	"sync"
 	"testing"
 
-	"claude-mesh/internal/mqtt"
+	"github.com/marioser/claude-mesh/internal/mqtt"
 )
 
 // fakeClient is an in-test implementation of mqtt.Client used for white-box testing.

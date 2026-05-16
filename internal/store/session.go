@@ -8,7 +8,7 @@ import (
 
 	"github.com/redis/go-redis/v9"
 
-	"claude-mesh/internal/events"
+	"github.com/marioser/claude-mesh/internal/events"
 )
 
 // OpenSession writes a new session Hash, sets TTL, and adds to the active ZSET.

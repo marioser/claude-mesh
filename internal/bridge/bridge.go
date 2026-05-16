@@ -11,9 +11,9 @@ import (
 
 	"go.uber.org/zap"
 
-	"claude-mesh/internal/events"
-	"claude-mesh/internal/mqtt"
-	"claude-mesh/internal/store"
+	"github.com/marioser/claude-mesh/internal/events"
+	"github.com/marioser/claude-mesh/internal/mqtt"
+	"github.com/marioser/claude-mesh/internal/store"
 )
 
 const (

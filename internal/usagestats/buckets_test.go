@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"claude-mesh/internal/usagestats"
+	"github.com/marioser/claude-mesh/internal/usagestats"
 )
 
 // makeTime creates a time.Time from a unix offset in seconds relative to a base.

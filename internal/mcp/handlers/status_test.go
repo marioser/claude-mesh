@@ -8,9 +8,9 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 
-	"claude-mesh/internal/events"
-	"claude-mesh/internal/mcp/handlers"
-	"claude-mesh/internal/store"
+	"github.com/marioser/claude-mesh/internal/events"
+	"github.com/marioser/claude-mesh/internal/mcp/handlers"
+	"github.com/marioser/claude-mesh/internal/store"
 )
 
 // fakeStore is a test double for store.Store.

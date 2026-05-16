@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"claude-mesh/internal/installer"
+	"github.com/marioser/claude-mesh/internal/installer"
 )
 
 // TestStatusLineFirstInstall verifies that PatchStatusLine adds the statusLine entry.

@@ -8,7 +8,7 @@ import (
 	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"
 
-	"claude-mesh/internal/store"
+	"github.com/marioser/claude-mesh/internal/store"
 )
 
 // newRedisStore creates a *store.RedisStore (concrete) backed by miniredis.

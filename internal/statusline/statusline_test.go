@@ -7,10 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"claude-mesh/internal/contextusage"
-	"claude-mesh/internal/events"
-	"claude-mesh/internal/statusline"
-	"claude-mesh/internal/store"
+	"github.com/marioser/claude-mesh/internal/contextusage"
+	"github.com/marioser/claude-mesh/internal/events"
+	"github.com/marioser/claude-mesh/internal/statusline"
+	"github.com/marioser/claude-mesh/internal/store"
 )
 
 // fakeStore implements store.Store for statusline tests.

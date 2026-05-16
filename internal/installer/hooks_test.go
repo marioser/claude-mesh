@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"claude-mesh/internal/installer"
+	"github.com/marioser/claude-mesh/internal/installer"
 )
 
 // copyFile copies src to dst for use in tests.

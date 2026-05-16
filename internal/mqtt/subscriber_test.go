@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"claude-mesh/internal/mqtt"
+	"github.com/marioser/claude-mesh/internal/mqtt"
 )
 
 // fakeSubClient is a Client implementation for subscriber tests.

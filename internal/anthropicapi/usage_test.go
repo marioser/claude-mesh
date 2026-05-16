@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"claude-mesh/internal/anthropicapi"
+	"github.com/marioser/claude-mesh/internal/anthropicapi"
 )
 
 // responseJSON builds a usage response JSON for the mock server.

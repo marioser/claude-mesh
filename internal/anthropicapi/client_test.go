@@ -6,7 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"claude-mesh/internal/anthropicapi"
+	"github.com/marioser/claude-mesh/internal/anthropicapi"
 )
 
 // TestNewPythonClientReturnsHTTPDoer verifies that NewPythonClient returns a non-nil

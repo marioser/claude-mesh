@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"claude-mesh/internal/usagestats"
+	"github.com/marioser/claude-mesh/internal/usagestats"
 )
 
 const testProjectsDir = "testdata/projects"

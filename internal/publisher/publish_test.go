@@ -9,9 +9,9 @@ import (
 	"sync"
 	"testing"
 
-	"claude-mesh/internal/config"
-	"claude-mesh/internal/mqtt"
-	"claude-mesh/internal/publisher"
+	"github.com/marioser/claude-mesh/internal/config"
+	"github.com/marioser/claude-mesh/internal/mqtt"
+	"github.com/marioser/claude-mesh/internal/publisher"
 )
 
 // fakeClient is an in-test implementation of mqtt.Client.
