@@ -3,7 +3,11 @@
 // none read env directly.
 package config
 
-import "github.com/caarlos0/env/v11"
+import (
+	"runtime"
+
+	"github.com/caarlos0/env/v11"
+)
 
 // EnvOptions holds all configuration for Claude Mesh, loaded from environment variables.
 type EnvOptions struct {
@@ -33,7 +37,12 @@ type EnvOptions struct {
 	HandlerTimeoutMs int `env:"CLAUDE_MESH_HANDLER_TIMEOUT_MS" envDefault:"100"`
 
 	// Logging.
-	LogPath  string `env:"CLAUDE_MESH_LOG_PATH"  envDefault:"~/Library/Logs/claude-mesh-bridge.log"`
+	// LogPath is the full path to the log file. If empty, it is derived from LogDir.
+	// LogDir is the directory containing the log file. If both are empty, an
+	// OS-appropriate default is used: ~/Library/Logs on macOS, ~/.local/state/claude-mesh
+	// (XDG_STATE_HOME) on Linux.
+	LogPath  string `env:"CLAUDE_MESH_LOG_PATH"  envDefault:""`
+	LogDir   string `env:"CLAUDE_MESH_LOG_DIR"   envDefault:""`
 	LogLevel string `env:"CLAUDE_MESH_LOG_LEVEL" envDefault:"info"`
 
 	// Anthropic usage API (optional).
@@ -51,5 +60,21 @@ func Load() (EnvOptions, error) {
 	if err := env.Parse(&cfg); err != nil {
 		return EnvOptions{}, err
 	}
+	cfg.LogPath = resolveLogPath(cfg.LogPath, cfg.LogDir)
 	return cfg, nil
+}
+
+// resolveLogPath returns the final log file path based on user overrides and OS.
+// Precedence: LOG_PATH > LOG_DIR/claude-mesh-bridge.log > OS default.
+func resolveLogPath(logPath, logDir string) string {
+	if logPath != "" {
+		return logPath
+	}
+	if logDir != "" {
+		return logDir + "/claude-mesh-bridge.log"
+	}
+	if runtime.GOOS == "linux" {
+		return "~/.local/state/claude-mesh/claude-mesh-bridge.log"
+	}
+	return "~/Library/Logs/claude-mesh-bridge.log"
 }

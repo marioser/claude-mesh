@@ -1,10 +1,61 @@
 package config_test
 
 import (
+	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/marioser/claude-mesh/internal/config"
 )
+
+// TestLogPathOSDefault verifies the OS-dependent default when neither LOG_PATH nor LOG_DIR is set.
+func TestLogPathOSDefault(t *testing.T) {
+	unsetEnv(t, allEnvKeys...)
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("Load() returned unexpected error: %v", err)
+	}
+
+	if runtime.GOOS == "linux" {
+		if !strings.Contains(cfg.LogPath, ".local/state/claude-mesh") {
+			t.Errorf("Linux LogPath default should be XDG state path, got %q", cfg.LogPath)
+		}
+	} else {
+		if !strings.Contains(cfg.LogPath, "Library/Logs") {
+			t.Errorf("macOS LogPath default should be ~/Library/Logs, got %q", cfg.LogPath)
+		}
+	}
+}
+
+// TestLogDirOverride verifies CLAUDE_MESH_LOG_DIR derives LogPath when LOG_PATH is unset.
+func TestLogDirOverride(t *testing.T) {
+	unsetEnv(t, allEnvKeys...)
+	t.Setenv("CLAUDE_MESH_LOG_DIR", "/var/log/claude-mesh")
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("Load() returned unexpected error: %v", err)
+	}
+	if cfg.LogPath != "/var/log/claude-mesh/claude-mesh-bridge.log" {
+		t.Errorf("LogPath from LogDir: got %q", cfg.LogPath)
+	}
+}
+
+// TestLogPathTakesPrecedence verifies CLAUDE_MESH_LOG_PATH wins over LOG_DIR.
+func TestLogPathTakesPrecedence(t *testing.T) {
+	unsetEnv(t, allEnvKeys...)
+	t.Setenv("CLAUDE_MESH_LOG_PATH", "/custom/path.log")
+	t.Setenv("CLAUDE_MESH_LOG_DIR", "/ignored")
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("Load() returned unexpected error: %v", err)
+	}
+	if cfg.LogPath != "/custom/path.log" {
+		t.Errorf("LogPath should win: got %q", cfg.LogPath)
+	}
+}
 
 // TestDefaultValues verifies that Load() returns design-specified defaults when no env vars are set.
 func TestDefaultValues(t *testing.T) {
@@ -178,6 +229,7 @@ var allEnvKeys = []string{
 	"CLAUDE_MESH_SWEEP_MS",
 	"CLAUDE_MESH_HANDLER_TIMEOUT_MS",
 	"CLAUDE_MESH_LOG_PATH",
+	"CLAUDE_MESH_LOG_DIR",
 	"CLAUDE_MESH_LOG_LEVEL",
 	"CLAUDE_MESH_ANTHROPIC_ORG_ID",
 	"CLAUDE_MESH_ANTHROPIC_COOKIE",
