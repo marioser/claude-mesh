@@ -1,0 +1,103 @@
+version: 2
+
+project_name: claude-mesh
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: claude-mesh-bridge
+    binary: claude-mesh-bridge
+    main: .
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.Date}}
+
+  - id: claude-mesh-mcp
+    binary: claude-mesh-mcp
+    main: ./cmd/claude-mesh-mcp
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.Date}}
+
+archives:
+  - id: default
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_
+      {{- if eq .Os "darwin" }}macos{{ else }}{{ .Os }}{{ end }}_
+      {{- if eq .Arch "amd64" }}x86_64{{ else }}{{ .Arch }}{{ end }}
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - LICENSE
+      - README.md
+      - CHANGELOG.md
+
+checksum:
+  name_template: "checksums.txt"
+  algorithm: sha256
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - "Merge pull request"
+  groups:
+    - title: Features
+      regexp: "^.*feat[(\\w)]*:+.*$"
+      order: 0
+    - title: Bug fixes
+      regexp: "^.*fix[(\\w)]*:+.*$"
+      order: 1
+    - title: Other
+      order: 999
+
+release:
+  github:
+    owner: marioser
+    name: claude-mesh
+  prerelease: auto
+  draft: false
+  header: |
+    ## Claude Mesh {{ .Tag }}
+
+    Install:
+
+    ```bash
+    curl -fsSL https://raw.githubusercontent.com/marioser/claude-mesh/main/install.sh | bash
+    ```
+
+    Or with Go:
+
+    ```bash
+    go install github.com/marioser/claude-mesh@{{ .Tag }}
+    go install github.com/marioser/claude-mesh/cmd/claude-mesh-mcp@{{ .Tag }}
+    ```
