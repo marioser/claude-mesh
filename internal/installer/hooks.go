@@ -105,11 +105,12 @@ func RemoveHooks(path string) error {
 	return atomicWrite(path, out)
 }
 
-// buildHookEntries returns the 3 hook entries Claude Mesh needs.
+// buildHookEntries returns the 4 hook entries Claude Mesh needs.
 // bridgeBin is accepted for future use (scripts may embed the binary path).
 func buildHookEntries(_ string, hooksDir string) map[string]hookEntry {
 	sessionStartScript := filepath.Join(hooksDir, "session-start.sh")
 	preToolUseScript := filepath.Join(hooksDir, "pre-tool-use.sh")
+	userPromptSubmitScript := filepath.Join(hooksDir, "user-prompt-submit.sh")
 	stopScript := filepath.Join(hooksDir, "stop.sh")
 
 	return map[string]hookEntry{
@@ -126,6 +127,13 @@ func buildHookEntries(_ string, hooksDir string) map[string]hookEntry {
 				Type:    "command",
 				Command: fmt.Sprintf("bash %s", preToolUseScript),
 				Name:    hookMarkerPrefix + "pre-tool-use",
+			}},
+		},
+		"UserPromptSubmit": {
+			Hooks: []hookDef{{
+				Type:    "command",
+				Command: fmt.Sprintf("bash %s", userPromptSubmitScript),
+				Name:    hookMarkerPrefix + "user-prompt-submit",
 			}},
 		},
 		"Stop": {

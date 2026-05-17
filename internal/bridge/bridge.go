@@ -21,6 +21,11 @@ const (
 	workerCount          = 2
 	defaultSweepInterval = 10 * time.Second
 
+	// DefaultSessionTTL is the default inactivity window after which a session
+	// is removed from the active-sessions ZSET. It can be overridden per-Bridge
+	// via NewWithConfig.
+	DefaultSessionTTL = 300 * time.Second
+
 	// Boot-retry backoff: 1s → 2s → 4s → 8s → 16s → 32s (capped).
 	retryInitial = 1 * time.Second
 	retryCap     = 32 * time.Second
@@ -58,21 +63,38 @@ type Bridge struct {
 	statsProvider StatsProvider // optional; nil when sub doesn't implement it
 	log           *zap.Logger
 	sweepInterval time.Duration
+	sessionTTL    time.Duration
 }
 
-// New creates a Bridge with the default 10s sweep interval.
+// New creates a Bridge with the default sweep interval and session TTL.
 // Pass nil for log to use a no-op logger.
 func New(sub Subscriber, s store.Store, log *zap.Logger) *Bridge {
-	return NewWithSweepInterval(sub, s, log, defaultSweepInterval)
+	return NewWithConfig(sub, s, log, defaultSweepInterval, DefaultSessionTTL)
 }
 
-// NewWithSweepInterval creates a Bridge with a configurable sweep interval.
-// Used in tests to accelerate the ticker.
+// NewWithSweepInterval creates a Bridge with a configurable sweep interval
+// and the default session TTL. Kept for backward compatibility.
 func NewWithSweepInterval(sub Subscriber, s store.Store, log *zap.Logger, sweepInterval time.Duration) *Bridge {
+	return NewWithConfig(sub, s, log, sweepInterval, DefaultSessionTTL)
+}
+
+// NewWithConfig creates a Bridge with a configurable sweep interval and
+// session TTL. A session whose last activity is older than sessionTTL is
+// removed from the active-sessions ZSET on the next sweep tick.
+func NewWithConfig(sub Subscriber, s store.Store, log *zap.Logger, sweepInterval, sessionTTL time.Duration) *Bridge {
 	if log == nil {
 		log = zap.NewNop()
 	}
-	b := &Bridge{sub: sub, store: s, log: log, sweepInterval: sweepInterval}
+	if sessionTTL <= 0 {
+		sessionTTL = DefaultSessionTTL
+	}
+	b := &Bridge{
+		sub:           sub,
+		store:         s,
+		log:           log,
+		sweepInterval: sweepInterval,
+		sessionTTL:    sessionTTL,
+	}
 	// Wire optional interfaces by type assertion — keeps the bridge decoupled from concrete types.
 	if hw, ok := s.(HealthWriter); ok {
 		b.healthWriter = hw
@@ -147,7 +169,7 @@ func (b *Bridge) Run(ctx context.Context) {
 			wg.Wait()
 			return
 		case <-ticker.C:
-			cutoff := float64(time.Now().Add(-90 * time.Second).UnixMilli())
+			cutoff := float64(time.Now().Add(-b.sessionTTL).UnixMilli())
 			n, err := b.store.SweepExpired(ctx, cutoff)
 			if err != nil {
 				b.log.Warn("sweep failed", zap.Error(err))

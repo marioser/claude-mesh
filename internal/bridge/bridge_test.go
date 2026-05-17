@@ -283,16 +283,17 @@ func TestSweepTickerFires(t *testing.T) {
 	fakeSub := &fakeSubscriber{}
 	s := newTestStore(t)
 
-	// Use a very short sweep interval (50ms) for the test.
-	b := bridge.NewWithSweepInterval(fakeSub, s, nil, 50*time.Millisecond)
+	// Use a very short sweep interval (50ms) and a short session TTL (1s) so the
+	// test doesn't have to wait for the production default to elapse.
+	b := bridge.NewWithConfig(fakeSub, s, nil, 50*time.Millisecond, 1*time.Second)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	go b.Run(ctx)
 	time.Sleep(20 * time.Millisecond)
 
-	// Open a session with a stale (2-minute-old) timestamp.
-	staleTs := float64(time.Now().Add(-2 * time.Minute).UnixMilli())
+	// Open a session with a stale timestamp older than the configured TTL.
+	staleTs := float64(time.Now().Add(-5 * time.Second).UnixMilli())
 	openEv := events.SessionOpen{Ts: staleTs, SessionID: "stale-sweep", Cwd: "/", Host: "h", PID: 1}
 	openPayload, _ := json.Marshal(openEv)
 	fakeSub.Send("claude/mesh/session/stale-sweep/open", openPayload)

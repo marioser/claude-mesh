@@ -122,7 +122,7 @@ func Install(p Paths) error {
 	}
 
 	// 2b. Copy hook scripts to stable hooks dir (executable).
-	for _, name := range []string{"session-start.sh", "pre-tool-use.sh", "stop.sh"} {
+	for _, name := range []string{"session-start.sh", "pre-tool-use.sh", "user-prompt-submit.sh", "stop.sh"} {
 		src := filepath.Join(p.SrcHooksDir, name)
 		dst := filepath.Join(p.StableHooksDir, name)
 		if err := copyFile(src, dst, 0o755); err != nil {
@@ -181,7 +181,7 @@ func Uninstall(p Paths) error {
 	}
 
 	// Remove stable hook scripts.
-	for _, name := range []string{"session-start.sh", "pre-tool-use.sh", "stop.sh"} {
+	for _, name := range []string{"session-start.sh", "pre-tool-use.sh", "user-prompt-submit.sh", "stop.sh"} {
 		path := filepath.Join(p.StableHooksDir, name)
 		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 			fmt.Fprintf(os.Stderr, "claude-mesh uninstall: remove hook %s: %v (continuing)\n", path, err)

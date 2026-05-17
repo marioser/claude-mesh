@@ -51,8 +51,13 @@ func TestHooksFirstInstall(t *testing.T) {
 	hooksRaw := settings["hooks"]
 	hooksStr := string(hooksRaw)
 
-	// Must contain all 3 claude-mesh marker names.
-	for _, marker := range []string{"claude-mesh-session-start", "claude-mesh-pre-tool-use", "claude-mesh-stop"} {
+	// Must contain all 4 claude-mesh marker names.
+	for _, marker := range []string{
+		"claude-mesh-session-start",
+		"claude-mesh-pre-tool-use",
+		"claude-mesh-user-prompt-submit",
+		"claude-mesh-stop",
+	} {
 		if !strings.Contains(hooksStr, marker) {
 			t.Errorf("after install, missing hook marker %q in: %s", marker, hooksStr)
 		}

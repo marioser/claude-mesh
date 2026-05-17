@@ -160,6 +160,7 @@ local-host setup.
 | `CLAUDE_MESH_LOG_DIR` | `~/Library/Logs` (macOS) | Where the daemon writes logs |
 | `CLAUDE_MESH_ANTHROPIC_ORG_ID` | _(empty, optional)_ | Anthropic usage poll org ID |
 | `CLAUDE_MESH_ANTHROPIC_COOKIE` | _(empty, optional)_ | Anthropic usage poll cookie |
+| `CLAUDE_MESH_SESSION_TTL_SECS` | `300` | Idle window (seconds) before a session is removed from the active-sessions ZSET |
 
 ### Optional: Anthropic usage tracking
 
