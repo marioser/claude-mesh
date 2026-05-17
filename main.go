@@ -399,7 +399,15 @@ func runPublish(eventType string, _ []string) error {
 		return fmt.Errorf("config: %w", err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	// Total budget covers MQTT connect + AUTH + publish + ack. 500ms was the
+	// historical default, fine for localhost (sub-ms) but too tight for any
+	// remote broker — a LAN-local Mosquitto with auth easily takes 200-400ms
+	// just for connect, leaving no headroom for the publish itself. Hook
+	// invocations then exit 0 silently while activity events never reach the
+	// broker. Override with CLAUDE_MESH_PUBLISH_TIMEOUT_MS for explicit
+	// tuning; default 2000ms accommodates remote brokers while still
+	// bounding hook runtime safely.
+	ctx, cancel := context.WithTimeout(context.Background(), publishTimeout())
 	defer cancel()
 
 	broker := fmt.Sprintf("tcp://%s:%d", cfg.MQTTHost, cfg.MQTTPort)
@@ -561,11 +569,45 @@ func runStatusline(_ []string) error {
 	return nil
 }
 
+// Default budgets for one-shot CLI subcommands invoked from Claude Code hooks.
+// Both can be overridden via env vars so users on slow disks or remote
+// brokers don't have to patch the binary.
+const (
+	defaultPublishTimeoutMs = 2000
+	defaultGitTimeoutMs     = 500
+)
+
+// publishTimeout returns the duration budget for runPublish. Reads
+// CLAUDE_MESH_PUBLISH_TIMEOUT_MS, falling back to defaultPublishTimeoutMs.
+func publishTimeout() time.Duration {
+	if v := os.Getenv("CLAUDE_MESH_PUBLISH_TIMEOUT_MS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return time.Duration(n) * time.Millisecond
+		}
+	}
+	return time.Duration(defaultPublishTimeoutMs) * time.Millisecond
+}
+
+// gitTimeout returns the duration budget shared by branch + status calls
+// in gitBranchAndChanges. Reads CLAUDE_MESH_GIT_TIMEOUT_MS, falling back
+// to defaultGitTimeoutMs.
+func gitTimeout() time.Duration {
+	if v := os.Getenv("CLAUDE_MESH_GIT_TIMEOUT_MS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return time.Duration(n) * time.Millisecond
+		}
+	}
+	return time.Duration(defaultGitTimeoutMs) * time.Millisecond
+}
+
 // gitBranchAndChanges returns the current git branch and the count of dirty files.
-// Both operations use a 100ms timeout and fail silently to "" / 0.
+// Both operations share a bounded timeout (default 500ms, override via
+// CLAUDE_MESH_GIT_TIMEOUT_MS) and fail silently to "" / 0. The previous
+// 100ms ceiling silently dropped branch + change-count rendering on cold
+// caches or heavy disk I/O.
 // Callers should invoke this in a goroutine when concurrency is desired.
 func gitBranchAndChanges() (branch string, changes int) {
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), gitTimeout())
 	defer cancel()
 
 	// Branch.

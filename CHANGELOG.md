@@ -32,6 +32,17 @@ until the project leaves beta.
   non-localhost setup even when the daemon was healthy. Defaults raised
   to 500ms (render) / 300ms (usage), both overridable via the new
   `CLAUDE_MESH_STATUSLINE_TIMEOUT_MS` env var.
+- `runPublish` MQTT timeout: the 500ms total budget for connect + AUTH +
+  publish + ack worked for localhost (sub-ms) but was too tight for any
+  remote broker — a LAN-local Mosquitto with auth easily takes 200-400ms
+  just to connect, leaving no headroom for the publish itself. The hook
+  CLI then exited 0 silently while activity events never reached the
+  broker. Default raised to 2000ms, configurable via the new
+  `CLAUDE_MESH_PUBLISH_TIMEOUT_MS` env var.
+- `gitBranchAndChanges` timeout: 100ms shared budget for `git branch
+  --show-current` + `git status --porcelain` silently dropped branch
+  and dirty-file rendering on cold caches or heavy disk I/O. Default
+  raised to 500ms, configurable via `CLAUDE_MESH_GIT_TIMEOUT_MS`.
 - Session lifecycle: `mesh_active_sessions` now reflects long-running and
   resumed sessions correctly. Previously the `stop.sh` hook published a
   `session-close` at the end of every agent turn (Claude Code fires the `Stop`
