@@ -5,6 +5,7 @@ package bridge
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -20,6 +21,13 @@ const (
 	chanCap              = 256
 	workerCount          = 2
 	defaultSweepInterval = 10 * time.Second
+
+	// DefaultSessionTTL is the default inactivity window after which a session
+	// is removed from the active-sessions ZSET by the sweep ticker. Sessions
+	// whose PID is verified alive on this host via the liveness check are
+	// refreshed before the sweep runs, so this TTL only fires for sessions
+	// that are truly dead, run on a different host, or cannot be probed.
+	DefaultSessionTTL = 300 * time.Second
 
 	// Boot-retry backoff: 1s → 2s → 4s → 8s → 16s → 32s (capped).
 	retryInitial = 1 * time.Second
@@ -50,6 +58,11 @@ type envelope struct {
 	payload []byte
 }
 
+// processChecker reports whether a PID is alive in the local process namespace.
+// It is a package-level function variable so tests can substitute a deterministic
+// implementation without spawning real processes.
+var processChecker = isProcessAlive
+
 // Bridge subscribes to the MQTT wildcard topic and routes events to Redis.
 type Bridge struct {
 	sub           Subscriber
@@ -58,21 +71,47 @@ type Bridge struct {
 	statsProvider StatsProvider // optional; nil when sub doesn't implement it
 	log           *zap.Logger
 	sweepInterval time.Duration
+	sessionTTL    time.Duration
+	hostname      string // resolved once at construction; empty means liveness skipped
 }
 
-// New creates a Bridge with the default 10s sweep interval.
+// New creates a Bridge with the default sweep interval and session TTL.
 // Pass nil for log to use a no-op logger.
 func New(sub Subscriber, s store.Store, log *zap.Logger) *Bridge {
-	return NewWithSweepInterval(sub, s, log, defaultSweepInterval)
+	return NewWithConfig(sub, s, log, defaultSweepInterval, DefaultSessionTTL)
 }
 
-// NewWithSweepInterval creates a Bridge with a configurable sweep interval.
-// Used in tests to accelerate the ticker.
+// NewWithSweepInterval creates a Bridge with a configurable sweep interval
+// and the default session TTL. Kept for backward compatibility with callers
+// that only need a faster ticker (typically tests).
 func NewWithSweepInterval(sub Subscriber, s store.Store, log *zap.Logger, sweepInterval time.Duration) *Bridge {
+	return NewWithConfig(sub, s, log, sweepInterval, DefaultSessionTTL)
+}
+
+// NewWithConfig creates a Bridge with a configurable sweep interval and
+// session TTL. The hostname is captured at construction time and used by
+// the liveness check to identify which sessions in the ZSET belong to this
+// host.
+func NewWithConfig(sub Subscriber, s store.Store, log *zap.Logger, sweepInterval, sessionTTL time.Duration) *Bridge {
 	if log == nil {
 		log = zap.NewNop()
 	}
-	b := &Bridge{sub: sub, store: s, log: log, sweepInterval: sweepInterval}
+	if sessionTTL <= 0 {
+		sessionTTL = DefaultSessionTTL
+	}
+	host, err := os.Hostname()
+	if err != nil {
+		log.Warn("bridge: hostname lookup failed, liveness check disabled", zap.Error(err))
+		host = ""
+	}
+	b := &Bridge{
+		sub:           sub,
+		store:         s,
+		log:           log,
+		sweepInterval: sweepInterval,
+		sessionTTL:    sessionTTL,
+		hostname:      host,
+	}
 	// Wire optional interfaces by type assertion — keeps the bridge decoupled from concrete types.
 	if hw, ok := s.(HealthWriter); ok {
 		b.healthWriter = hw
@@ -147,7 +186,17 @@ func (b *Bridge) Run(ctx context.Context) {
 			wg.Wait()
 			return
 		case <-ticker.C:
-			cutoff := float64(time.Now().Add(-90 * time.Second).UnixMilli())
+			// Refresh any session whose PID is still alive on this host
+			// BEFORE the sweep runs. This prevents idle sessions (those
+			// not invoking the file-touching hooks) from being evicted
+			// while their claude process is still alive.
+			if touched, err := b.refreshLiveSessions(ctx); err != nil {
+				b.log.Warn("refresh live sessions failed", zap.Error(err))
+			} else if touched > 0 {
+				b.log.Debug("refreshed live sessions", zap.Int("count", touched))
+			}
+
+			cutoff := float64(time.Now().Add(-b.sessionTTL).UnixMilli())
 			n, err := b.store.SweepExpired(ctx, cutoff)
 			if err != nil {
 				b.log.Warn("sweep failed", zap.Error(err))
@@ -157,6 +206,42 @@ func (b *Bridge) Run(ctx context.Context) {
 			b.writeMQTTHealth(ctx)
 		}
 	}
+}
+
+// refreshLiveSessions iterates the active-sessions ZSET, identifies sessions
+// that belong to this host, and refreshes their last-seen score whenever the
+// underlying claude process is still alive. Sessions on other hosts are left
+// untouched and continue to be governed by the sweep cutoff. Returns the
+// number of sessions whose score was refreshed.
+//
+// The hostname comparison is what keeps this safe in a (theoretical) shared
+// broker setup: we only ever attempt to probe PIDs we own.
+func (b *Bridge) refreshLiveSessions(ctx context.Context) (int, error) {
+	if b.hostname == "" {
+		return 0, nil
+	}
+	sessions, err := b.store.ListActiveSessions(ctx)
+	if err != nil {
+		return 0, err
+	}
+	nowMs := float64(time.Now().UnixMilli())
+	var touched int
+	for _, s := range sessions {
+		if s.Host != b.hostname {
+			continue
+		}
+		if !processChecker(s.PID) {
+			continue
+		}
+		if err := b.store.TouchSession(ctx, s.ID, nowMs); err != nil {
+			b.log.Debug("bridge: TouchSession failed during liveness refresh",
+				zap.String("sid", s.ID),
+				zap.Error(err))
+			continue
+		}
+		touched++
+	}
+	return touched, nil
 }
 
 // writeMQTTHealth publishes the subscriber health state to Redis if both

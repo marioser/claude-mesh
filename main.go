@@ -210,7 +210,18 @@ func runBridge(_ []string) error {
 	// Apply the initial connect result that the OnConnectHandler missed
 	// because `sub` was nil when paho fired it during Connect().
 	sub.SetConnected(initialConnectOK)
-	b := bridge.New(sub, s, log)
+
+	sessionTTL := bridge.DefaultSessionTTL
+	if v := strings.TrimSpace(os.Getenv("CLAUDE_MESH_SESSION_TTL_SECS")); v != "" {
+		if secs, err := strconv.Atoi(v); err == nil && secs > 0 {
+			sessionTTL = time.Duration(secs) * time.Second
+		} else {
+			log.Warn("invalid CLAUDE_MESH_SESSION_TTL_SECS, using default",
+				zap.String("value", v),
+				zap.Duration("default", bridge.DefaultSessionTTL))
+		}
+	}
+	b := bridge.NewWithConfig(sub, s, log, 10*time.Second, sessionTTL)
 
 	log.Info("bridge ready", zap.String("client_id", clientID), zap.String("lock", lockPath))
 
@@ -596,6 +607,11 @@ Environment:
   CLAUDE_MESH_MQTT_PORT     MQTT broker port (default: 1883)
   CLAUDE_MESH_REDIS_ADDR    Redis address (default: localhost:6379)
   CLAUDE_MESH_LOG_LEVEL     Log level: debug|info|warn|error (default: info)
+  CLAUDE_MESH_SESSION_TTL_SECS  Inactivity window (seconds) before a session is
+                                evicted from the active-sessions ZSET. Sessions
+                                whose PID is verified alive on this host are
+                                refreshed every sweep tick and never reach this
+                                cutoff. (default: 300)
 `)
 }
 
