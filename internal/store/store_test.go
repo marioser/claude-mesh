@@ -121,6 +121,129 @@ func TestTouchSession(t *testing.T) {
 	}
 }
 
+// TestTouchOrCreateSession_NewSession verifies that calling TouchOrCreateSession
+// on a session id that was never opened registers it in the active ZSET with the
+// cwd from the activity payload — this is how resumed/recovered sessions reappear.
+func TestTouchOrCreateSession_NewSession(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	sid := "sess-resume"
+	ts := nowMs()
+	if err := s.TouchOrCreateSession(ctx, sid, ts, "/path/from/activity"); err != nil {
+		t.Fatalf("TouchOrCreateSession: %v", err)
+	}
+
+	view, err := s.GetSession(ctx, sid)
+	if err != nil || view == nil {
+		t.Fatalf("GetSession after upsert: %v (view=%v)", err, view)
+	}
+	if view.Cwd != "/path/from/activity" {
+		t.Errorf("Cwd seeded: got %q, want %q", view.Cwd, "/path/from/activity")
+	}
+	if view.LastSeenMs != ts {
+		t.Errorf("LastSeenMs: got %v, want %v", view.LastSeenMs, ts)
+	}
+	if view.OpenedAtMs != ts {
+		t.Errorf("OpenedAtMs seeded with ts: got %v, want %v", view.OpenedAtMs, ts)
+	}
+
+	sessions, err := s.ListActiveSessions(ctx)
+	if err != nil {
+		t.Fatalf("ListActiveSessions: %v", err)
+	}
+	var found bool
+	for _, sess := range sessions {
+		if sess.ID == sid {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("session %q not in active ZSET after TouchOrCreateSession", sid)
+	}
+}
+
+// TestTouchOrCreateSession_PreservesExistingMetadata verifies that calling
+// TouchOrCreateSession on an already-open session refreshes last_seen WITHOUT
+// overwriting cwd/host/pid (HSetNX semantics).
+func TestTouchOrCreateSession_PreservesExistingMetadata(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	ev := events.SessionOpen{
+		Ts: nowMs(), SessionID: "sess-upsert-existing",
+		Cwd: "/original", Host: "host-A", PID: 42, GitBranch: "main",
+	}
+	if err := s.OpenSession(ctx, ev); err != nil {
+		t.Fatalf("OpenSession: %v", err)
+	}
+
+	newTs := nowMs() + 5000
+	if err := s.TouchOrCreateSession(ctx, ev.SessionID, newTs, "/different"); err != nil {
+		t.Fatalf("TouchOrCreateSession: %v", err)
+	}
+
+	view, err := s.GetSession(ctx, ev.SessionID)
+	if err != nil || view == nil {
+		t.Fatalf("GetSession: %v", err)
+	}
+	if view.Cwd != "/original" {
+		t.Errorf("Cwd was overwritten: got %q, want %q (HSetNX must preserve)", view.Cwd, "/original")
+	}
+	if view.Host != "host-A" {
+		t.Errorf("Host was overwritten: got %q, want %q", view.Host, "host-A")
+	}
+	if view.PID != 42 {
+		t.Errorf("PID was overwritten: got %d, want %d", view.PID, 42)
+	}
+	if view.GitBranch != "main" {
+		t.Errorf("GitBranch was overwritten: got %q, want %q", view.GitBranch, "main")
+	}
+	if view.LastSeenMs != newTs {
+		t.Errorf("LastSeenMs not refreshed: got %v, want %v", view.LastSeenMs, newTs)
+	}
+}
+
+// TestTouchOrCreateSession_ResurrectsClosedSession verifies the end-to-end
+// recovery scenario: a session is closed (e.g. by a buggy hook), its Hash
+// expires, and a subsequent activity event brings it back into the active ZSET.
+func TestTouchOrCreateSession_ResurrectsClosedSession(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	ev := events.SessionOpen{
+		Ts: nowMs(), SessionID: "sess-resurrect", Cwd: "/orig", Host: "h", PID: 7,
+	}
+	if err := s.OpenSession(ctx, ev); err != nil {
+		t.Fatalf("OpenSession: %v", err)
+	}
+	if err := s.CloseSession(ctx, ev.SessionID); err != nil {
+		t.Fatalf("CloseSession: %v", err)
+	}
+
+	// Activity arrives after close — must re-register the session.
+	activityTs := nowMs() + 1000
+	if err := s.TouchOrCreateSession(ctx, ev.SessionID, activityTs, "/recovered"); err != nil {
+		t.Fatalf("TouchOrCreateSession after close: %v", err)
+	}
+
+	sessions, err := s.ListActiveSessions(ctx)
+	if err != nil {
+		t.Fatalf("ListActiveSessions: %v", err)
+	}
+	var found bool
+	for _, sess := range sessions {
+		if sess.ID == ev.SessionID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("session %q not re-registered after activity following close", ev.SessionID)
+	}
+}
+
 // TestCloseSession verifies that CloseSession removes the session from the ZSET
 // and sets a short EXPIRE on the Hash (not an immediate DEL).
 func TestCloseSession(t *testing.T) {

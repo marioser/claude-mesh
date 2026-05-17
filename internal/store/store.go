@@ -45,7 +45,19 @@ type Store interface {
 	OpenSession(ctx context.Context, ev events.SessionOpen) error
 
 	// TouchSession updates last_seen, resets TTL, and updates the ZSET score.
+	// If the session Hash has been evicted or never opened, only the last_seen field
+	// is written; identifying metadata (cwd, host, pid) will remain unset.
+	// Prefer TouchOrCreateSession when a cwd is available so resumed or pre-evicted
+	// sessions reappear in active listings with usable metadata.
 	TouchSession(ctx context.Context, sid string, lastSeenMs float64) error
+
+	// TouchOrCreateSession is the activity-friendly variant of TouchSession.
+	// It refreshes last_seen and the ZSET score like TouchSession, and additionally
+	// seeds session_id / cwd / opened_at when the Hash does not yet exist
+	// (HSetNX semantics — existing values are never overwritten).
+	// This is what lets resumed sessions and sessions whose Hash expired during a
+	// brief close-grace window reappear automatically on the next activity event.
+	TouchOrCreateSession(ctx context.Context, sid string, lastSeenMs float64, cwd string) error
 
 	// CloseSession removes the session from the active ZSET and sets a short EXPIRE.
 	CloseSession(ctx context.Context, sid string) error
