@@ -18,6 +18,10 @@ until the project leaves beta.
   metadata (cwd, opened_at) only when the session Hash is absent (HSetNX
   semantics). Lets resumed sessions and sessions whose Hash expired during
   the close-grace window reappear automatically.
+- Hooks now source `${XDG_CONFIG_HOME:-$HOME/.config}/claude-mesh/hook-env`
+  if it exists, so users running against a non-localhost MQTT broker / Redis
+  no longer need to fight Claude Code's stripped hook environment. An
+  example file is shipped at `examples/hook-env`.
 
 ### Fixed
 
@@ -32,6 +36,12 @@ until the project leaves beta.
     `TouchSession`, so a session that was closed (or never opened via
     `session-start`, e.g. `claude --resume`) is re-registered on its next
     activity event.
+- Hook env loading: Claude Code launches hooks with a stripped environment,
+  so `CLAUDE_MESH_*` exports from `~/.zshenv` / `~/.bashrc` never reached
+  the bridge CLI invoked by the hook. The CLI silently fell back to
+  `localhost:1883` / `localhost:6379` and published nothing, leaving
+  `mesh_active_sessions` empty for any non-localhost deployment.
+  Hooks now load config from `${XDG_CONFIG_HOME:-$HOME/.config}/claude-mesh/hook-env`.
 
 ### Changed
 

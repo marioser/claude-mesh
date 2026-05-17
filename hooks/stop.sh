@@ -20,6 +20,17 @@
 
 set -euo pipefail
 
+# Mirror the env-loading pattern of the other hooks for forward-compatibility,
+# even though this hook does not currently publish to the broker.
+# Convention: ${XDG_CONFIG_HOME:-$HOME/.config}/claude-mesh/hook-env
+_cm_env_file="${XDG_CONFIG_HOME:-$HOME/.config}/claude-mesh/hook-env"
+if [ -f "${_cm_env_file}" ]; then
+    set -a
+    # shellcheck disable=SC1090
+    source "${_cm_env_file}" 2>/dev/null || true
+    set +a
+fi
+
 LOG_FILE="${HOME}/Library/Logs/claude-mesh-hooks.log"
 
 log() {

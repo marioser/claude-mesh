@@ -1,0 +1,31 @@
+# Claude Mesh — hook environment file (example)
+#
+# Copy to ${XDG_CONFIG_HOME:-$HOME/.config}/claude-mesh/hook-env
+# (i.e. ~/.config/claude-mesh/hook-env on most systems) and edit.
+#
+# This file is sourced by the bash hooks installed under
+# ~/.claude/hooks/claude-mesh/ before each hook invokes claude-mesh-bridge.
+# Claude Code strips the environment when it launches hooks, so without
+# this file the bridge CLI falls back to localhost defaults — fine for
+# local development, broken for any shared broker setup.
+#
+# Format: standard shell variable assignments. Lines starting with `#`
+# are comments. No `export` keyword required (the hook uses `set -a`
+# to auto-export everything sourced).
+#
+# Permissions: chmod 600 (these are credentials).
+# Never commit this file; the repo only ships the example.
+
+# --- MQTT broker (required for non-localhost setups) ---
+CLAUDE_MESH_MQTT_HOST=localhost
+CLAUDE_MESH_MQTT_PORT=1883
+# CLAUDE_MESH_MQTT_USERNAME=
+# CLAUDE_MESH_MQTT_PASSWORD=
+
+# --- Redis (required for non-localhost setups) ---
+CLAUDE_MESH_REDIS_ADDR=localhost:6379
+# CLAUDE_MESH_REDIS_PASSWORD=
+# CLAUDE_MESH_REDIS_DB=0
+
+# --- Logging (optional) ---
+# CLAUDE_MESH_LOG_LEVEL=info

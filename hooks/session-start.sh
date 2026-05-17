@@ -6,6 +6,21 @@
 
 set -euo pipefail
 
+# Claude Code launches hooks with a stripped environment — shell exports in
+# ~/.zshenv / ~/.bashrc / ~/.profile do NOT reach this subprocess. Load the
+# bridge connection config (CLAUDE_MESH_MQTT_*, CLAUDE_MESH_REDIS_*) from a
+# user-controlled file so the bridge CLI can reach a non-localhost broker.
+# Convention: ${XDG_CONFIG_HOME:-$HOME/.config}/claude-mesh/hook-env
+# See examples/hook-env in the repo for the expected format.
+# shellcheck disable=SC1090
+_cm_env_file="${XDG_CONFIG_HOME:-$HOME/.config}/claude-mesh/hook-env"
+if [ -f "${_cm_env_file}" ]; then
+    set -a
+    # shellcheck disable=SC1090
+    source "${_cm_env_file}" 2>/dev/null || true
+    set +a
+fi
+
 LOG_FILE="${HOME}/Library/Logs/claude-mesh-hooks.log"
 BRIDGE_BIN="claude-mesh-bridge"
 
