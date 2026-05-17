@@ -302,8 +302,13 @@ func (b *Bridge) handle(ctx context.Context, env envelope) {
 			b.log.Error("bridge: PushActivity failed", zap.String("sid", sid), zap.Error(err))
 			return
 		}
-		if err := b.store.TouchSession(ctx, sid, ev.Ts); err != nil {
-			b.log.Debug("bridge: TouchSession failed (session may not exist)", zap.String("sid", sid), zap.Error(err))
+		// Use TouchOrCreateSession so resumed sessions and sessions whose Hash
+		// expired during the close-grace window reappear in active listings on
+		// their next activity event. Cwd from the payload seeds identifying
+		// metadata only when the Hash is absent (HSetNX); existing data is
+		// preserved.
+		if err := b.store.TouchOrCreateSession(ctx, sid, ev.Ts, ev.Cwd); err != nil {
+			b.log.Warn("bridge: TouchOrCreateSession failed", zap.String("sid", sid), zap.Error(err))
 		}
 
 	case "close":
