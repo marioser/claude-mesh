@@ -48,6 +48,27 @@ func (r *RedisStore) TouchSession(ctx context.Context, sid string, lastSeenMs fl
 	return err
 }
 
+// TouchOrCreateSession refreshes last_seen and the ZSET score, and additionally
+// seeds the session_id / cwd / opened_at fields when the Hash does not exist
+// (HSetNX — existing values are preserved). This is the activity-friendly
+// variant used by the bridge when handling activity events: a resumed session
+// or one whose Hash expired during the brief close-grace window will reappear
+// in active listings on its next activity event instead of staying invisible.
+func (r *RedisStore) TouchOrCreateSession(ctx context.Context, sid string, lastSeenMs float64, cwd string) error {
+	key := SessionKey(sid)
+	pipe := r.client.Pipeline()
+	// HSetNX seeds identifying fields only when the Hash is absent.
+	pipe.HSetNX(ctx, key, "session_id", sid)
+	pipe.HSetNX(ctx, key, "cwd", cwd)
+	pipe.HSetNX(ctx, key, "opened_at", lastSeenMs)
+	// HSet always refreshes last_seen for both existing and freshly seeded sessions.
+	pipe.HSet(ctx, key, "last_seen", lastSeenMs)
+	pipe.Expire(ctx, key, time.Duration(r.cfg.SessionTTL)*time.Second)
+	pipe.ZAdd(ctx, activeSessions, redis.Z{Score: lastSeenMs, Member: sid})
+	_, err := pipe.Exec(ctx)
+	return err
+}
+
 // CloseSession removes the session from the ZSET and sets a short EXPIRE (grace period).
 // The Hash is NOT deleted immediately so in-flight reads still succeed.
 func (r *RedisStore) CloseSession(ctx context.Context, sid string) error {
