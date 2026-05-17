@@ -15,12 +15,35 @@ package statusline
 import (
 	"context"
 	"fmt"
+	"os"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/marioser/claude-mesh/internal/contextusage"
 	"github.com/marioser/claude-mesh/internal/store"
 )
+
+// Default Redis budgets for the statusline. Tuned for local Redis (sub-ms).
+// Override with CLAUDE_MESH_STATUSLINE_TIMEOUT_MS for remote Redis where
+// connect + AUTH alone can take 40-80ms over a LAN; previous 50ms hard-coded
+// budget caused permanent "daemon down" rendering for non-localhost setups.
+const (
+	defaultRenderTimeoutMs = 500
+	defaultUsageTimeoutMs  = 300
+)
+
+// statuslineTimeoutMs returns the milliseconds budget for Redis queries from
+// the statusline. Reads CLAUDE_MESH_STATUSLINE_TIMEOUT_MS, falling back to
+// the supplied default.
+func statuslineTimeoutMs(defaultMs int) time.Duration {
+	if raw := os.Getenv("CLAUDE_MESH_STATUSLINE_TIMEOUT_MS"); raw != "" {
+		if v, err := strconv.Atoi(raw); err == nil && v > 0 {
+			return time.Duration(v) * time.Millisecond
+		}
+	}
+	return time.Duration(defaultMs) * time.Millisecond
+}
 
 const (
 	sep      = " │ "
@@ -47,10 +70,12 @@ type PlanUsage struct {
 	Source string
 }
 
-// ReadUsage reads plan usage data from Redis with a 30ms timeout.
+// ReadUsage reads plan usage data from Redis with a bounded timeout.
+// Default budget is 300ms (was 30ms hard-coded); override via
+// CLAUDE_MESH_STATUSLINE_TIMEOUT_MS for slower / remote Redis.
 // Returns zero PlanUsage if any key is missing or Redis is unavailable.
 func ReadUsage(ctx context.Context, s store.Store) PlanUsage {
-	rctx, cancel := context.WithTimeout(ctx, 30*time.Millisecond)
+	rctx, cancel := context.WithTimeout(ctx, statuslineTimeoutMs(defaultUsageTimeoutMs))
 	defer cancel()
 
 	pct5h, err := s.GetFloat(rctx, usageKeyPct5h)
@@ -110,8 +135,10 @@ func Render(ctx context.Context, s store.Store, branch string, in Input, u conte
 	}
 
 	// Use a short-lived context to enforce the Redis budget.
-	// If the caller's context is already done, we still want to return the fallback fast.
-	redisCtx, cancel := context.WithTimeout(ctx, 50*time.Millisecond)
+	// Default 500ms (was 50ms hard-coded — too tight for remote Redis where
+	// connect + AUTH can take 40-80ms over a LAN). Override via
+	// CLAUDE_MESH_STATUSLINE_TIMEOUT_MS.
+	redisCtx, cancel := context.WithTimeout(ctx, statuslineTimeoutMs(defaultRenderTimeoutMs))
 	defer cancel()
 
 	// Read plan usage (best-effort, 30ms budget inside ReadUsage).

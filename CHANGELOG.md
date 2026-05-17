@@ -25,6 +25,13 @@ until the project leaves beta.
 
 ### Fixed
 
+- Statusline Redis budget: the hard-coded 30ms / 50ms timeouts in
+  `internal/statusline/Render` and `ReadUsage` were too tight for any
+  remote Redis (LAN latency + AUTH alone can take 40-80ms), making the
+  statusline render `⚪ daemon down` and `🔵 0 sesiones` for every
+  non-localhost setup even when the daemon was healthy. Defaults raised
+  to 500ms (render) / 300ms (usage), both overridable via the new
+  `CLAUDE_MESH_STATUSLINE_TIMEOUT_MS` env var.
 - Session lifecycle: `mesh_active_sessions` now reflects long-running and
   resumed sessions correctly. Previously the `stop.sh` hook published a
   `session-close` at the end of every agent turn (Claude Code fires the `Stop`
