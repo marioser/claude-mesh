@@ -13,6 +13,25 @@ until the project leaves beta.
 
 - `LICENSE` (MIT), `CONTRIBUTING.md`, and a public-facing `README.md`.
 - `.gitignore` covering `dist/` build artifacts.
+- `Store.TouchOrCreateSession` — activity-friendly upsert that registers a
+  session in the active ZSET on its first activity event, seeding identifying
+  metadata (cwd, opened_at) only when the session Hash is absent (HSetNX
+  semantics). Lets resumed sessions and sessions whose Hash expired during
+  the close-grace window reappear automatically.
+
+### Fixed
+
+- Session lifecycle: `mesh_active_sessions` now reflects long-running and
+  resumed sessions correctly. Previously the `stop.sh` hook published a
+  `session-close` at the end of every agent turn (Claude Code fires the `Stop`
+  event after every turn, not just at session termination), causing the bridge
+  to evict active sessions immediately. Two changes ship together:
+  - `hooks/stop.sh` is now a no-op; sessions expire naturally via the
+    bridge `SessionTTL` sweep when activity stops.
+  - The bridge `activity` handler now uses `TouchOrCreateSession` instead of
+    `TouchSession`, so a session that was closed (or never opened via
+    `session-start`, e.g. `claude --resume`) is re-registered on its next
+    activity event.
 
 ### Changed
 

@@ -1,69 +1,46 @@
 #!/usr/bin/env bash
-# Claude Mesh — Stop hook
-# Publishes a session-close event. MUST check stop_hook_active to prevent infinite loop.
-# Always exits 0 — never blocks Claude Code.
-# Produces NO stdout output.
+# Claude Mesh — Stop hook (no-op since v0.x.y)
+#
+# Claude Code fires the `Stop` event at the end of EVERY agent turn,
+# not just at session termination. Publishing session-close on Stop
+# caused the bridge to evict active sessions after each turn, leaving
+# mesh_active_sessions permanently empty.
+#
+# Sessions now expire naturally via the bridge's SessionTTL sweep when
+# no activity events arrive for the configured window. Activity events
+# (PreToolUse) refresh the session via TouchOrCreateSession in the bridge.
+#
+# This hook is kept (instead of being removed) so that existing installs
+# whose ~/.claude/settings.json still references stop.sh continue to work
+# silently — no orphan hook errors, no manual cleanup required.
+#
+# If you need a hard close (e.g. process exit), publish manually:
+#   echo '{"ts":...,"session_id":"...","reason":"exit"}' \
+#     | claude-mesh-bridge publish session-close
 
 set -euo pipefail
 
 LOG_FILE="${HOME}/Library/Logs/claude-mesh-hooks.log"
-BRIDGE_BIN="claude-mesh-bridge"
 
 log() {
     echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] stop: $*" >> "${LOG_FILE}" 2>&1
 }
 
-INPUT=$(cat)
-
-# LOOP GUARD: if stop_hook_active is true, exit immediately.
-# Use jq if available, else grep fallback (no jq dependency required).
+# Loop guard parity with previous version: if Claude re-fires the Stop
+# hook within the same turn (stop_hook_active=true), exit immediately.
+INPUT=$(cat || true)
 if command -v jq > /dev/null 2>&1; then
     STOP_ACTIVE=$(echo "${INPUT}" | jq -r '.stop_hook_active // false' 2>/dev/null || echo "false")
+elif echo "${INPUT}" | grep -q '"stop_hook_active"[[:space:]]*:[[:space:]]*true' 2>/dev/null; then
+    STOP_ACTIVE="true"
 else
-    if echo "${INPUT}" | grep -q '"stop_hook_active"[[:space:]]*:[[:space:]]*true'; then
-        STOP_ACTIVE="true"
-    else
-        STOP_ACTIVE="false"
-    fi
+    STOP_ACTIVE="false"
 fi
-
 if [ "${STOP_ACTIVE}" = "true" ]; then
     exit 0
 fi
 
-# Guard: binary must exist.
-if ! command -v "${BRIDGE_BIN}" > /dev/null 2>&1; then
-    exit 0
-fi
-
 SESSION_ID=$(echo "${INPUT}" | jq -r '.session_id // ""' 2>/dev/null || true)
-TS=$(python3 -c "import time; print(f'{time.time()*1000:.3f}')" 2>/dev/null || date +%s000)
-
-if [ -z "${SESSION_ID}" ]; then
-    exit 0
-fi
-
-PAYLOAD=$(jq -n \
-    --arg ts "${TS}" \
-    --arg session_id "${SESSION_ID}" \
-    --arg reason "stop" \
-    '{ts: ($ts | tonumber), session_id: $session_id, reason: $reason}' \
-    2>/dev/null)
-
-if [ -z "${PAYLOAD}" ]; then
-    exit 0
-fi
-
-# Publish with timeout — prefer gtimeout (brew coreutils), then timeout, then no-timeout fallback.
-if command -v gtimeout > /dev/null 2>&1; then
-    echo "${PAYLOAD}" | gtimeout 2s "${BRIDGE_BIN}" publish session-close >> "${LOG_FILE}" 2>&1 || log "publish timeout or failed"
-elif command -v timeout > /dev/null 2>&1; then
-    echo "${PAYLOAD}" | timeout 2s "${BRIDGE_BIN}" publish session-close >> "${LOG_FILE}" 2>&1 || log "publish timeout or failed"
-else
-    echo "${PAYLOAD}" | perl -e 'alarm(2); exec @ARGV' "${BRIDGE_BIN}" publish session-close >> "${LOG_FILE}" 2>&1 || log "publish failed"
-fi
-
-# Smoke log: proof of execution for debugging session lifecycle.
-log "session closed: session_id=${SESSION_ID}"
+log "stop received (no-op, session kept alive by TTL): session_id=${SESSION_ID}"
 
 exit 0
