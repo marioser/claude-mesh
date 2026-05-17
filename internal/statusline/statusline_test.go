@@ -22,7 +22,10 @@ type fakeStore struct {
 
 func (f *fakeStore) OpenSession(_ context.Context, _ events.SessionOpen) error { return nil }
 func (f *fakeStore) TouchSession(_ context.Context, _ string, _ float64) error { return nil }
-func (f *fakeStore) CloseSession(_ context.Context, _ string) error            { return nil }
+func (f *fakeStore) TouchOrCreateSession(_ context.Context, _ string, _ float64, _ string) error {
+	return nil
+}
+func (f *fakeStore) CloseSession(_ context.Context, _ string) error { return nil }
 func (f *fakeStore) GetSession(_ context.Context, _ string) (*store.SessionView, error) {
 	return nil, nil
 }

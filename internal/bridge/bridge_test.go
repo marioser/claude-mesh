@@ -148,6 +148,112 @@ func TestActivityEventRecorded(t *testing.T) {
 	}
 }
 
+// TestActivityResurrectsClosedSession verifies the end-to-end recovery flow:
+// 1) a session is opened, 2) a session-close arrives (as the legacy stop hook
+// would have produced), 3) a subsequent activity event re-registers the session
+// in the active ZSET — driven by the bridge calling TouchOrCreateSession with
+// the activity payload's cwd. This is the lifecycle fix in motion.
+func TestActivityResurrectsClosedSession(t *testing.T) {
+	fakeSub := &fakeSubscriber{}
+	s := newTestStore(t)
+	b := bridge.New(fakeSub, s, nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	go b.Run(ctx)
+	time.Sleep(20 * time.Millisecond)
+
+	sid := "resurrect-sess"
+
+	// 1) Open.
+	openEv := events.SessionOpen{Ts: nowMs(), SessionID: sid, Cwd: "/orig", Host: "h", PID: 1}
+	openPayload, _ := json.Marshal(openEv)
+	fakeSub.Send("claude/mesh/session/"+sid+"/open", openPayload)
+	time.Sleep(50 * time.Millisecond)
+
+	// 2) Close (simulates the legacy stop hook firing at end of a turn).
+	closeEv := events.SessionClose{Ts: nowMs(), SessionID: sid, Reason: "stop"}
+	closePayload, _ := json.Marshal(closeEv)
+	fakeSub.Send("claude/mesh/session/"+sid+"/close", closePayload)
+	time.Sleep(50 * time.Millisecond)
+
+	// Sanity: session must be gone from active after close.
+	sessions, err := s.ListActiveSessions(context.Background())
+	if err != nil {
+		t.Fatalf("ListActiveSessions after close: %v", err)
+	}
+	for _, sess := range sessions {
+		if sess.ID == sid {
+			t.Fatal("session unexpectedly still in active ZSET right after close")
+		}
+	}
+
+	// 3) Activity arrives — must re-register the session.
+	act := events.Activity{
+		Ts: nowMs(), SessionID: sid, Tool: "Edit", Target: "main.go", Cwd: "/orig",
+	}
+	actPayload, _ := json.Marshal(act)
+	fakeSub.Send("claude/mesh/session/"+sid+"/activity", actPayload)
+	time.Sleep(100 * time.Millisecond)
+
+	sessions, err = s.ListActiveSessions(context.Background())
+	if err != nil {
+		t.Fatalf("ListActiveSessions after activity: %v", err)
+	}
+	var found bool
+	for _, sess := range sessions {
+		if sess.ID == sid {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("session %q not re-registered after activity following close", sid)
+	}
+}
+
+// TestActivityOnUnknownSessionRegistersIt verifies that an activity event for
+// a session_id never seen before (e.g. a `claude --resume` that never fired
+// SessionStart) auto-registers the session — no separate session-open required.
+func TestActivityOnUnknownSessionRegistersIt(t *testing.T) {
+	fakeSub := &fakeSubscriber{}
+	s := newTestStore(t)
+	b := bridge.New(fakeSub, s, nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	go b.Run(ctx)
+	time.Sleep(20 * time.Millisecond)
+
+	sid := "never-opened-sess"
+	act := events.Activity{
+		Ts: nowMs(), SessionID: sid, Tool: "Read", Target: "README.md", Cwd: "/some/cwd",
+	}
+	actPayload, _ := json.Marshal(act)
+	fakeSub.Send("claude/mesh/session/"+sid+"/activity", actPayload)
+	time.Sleep(100 * time.Millisecond)
+
+	sessions, err := s.ListActiveSessions(context.Background())
+	if err != nil {
+		t.Fatalf("ListActiveSessions: %v", err)
+	}
+	var found bool
+	var foundCwd string
+	for _, sess := range sessions {
+		if sess.ID == sid {
+			found = true
+			foundCwd = sess.Cwd
+			break
+		}
+	}
+	if !found {
+		t.Errorf("session %q not auto-registered by activity event", sid)
+	}
+	if foundCwd != "/some/cwd" {
+		t.Errorf("auto-registered cwd: got %q, want %q", foundCwd, "/some/cwd")
+	}
+}
+
 // TestSessionCloseEventHandled verifies that a session-close MQTT message results
 // in the session being removed from the active ZSET.
 func TestSessionCloseEventHandled(t *testing.T) {
